@@ -1,0 +1,105 @@
+name: Build mDL Dashboard
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # ── Vendor external assets ────────────────────────────────────────────
+      - name: Cache vendored assets
+        id: vendor-cache
+        uses: actions/cache@v4
+        with:
+          path: docs/assets
+          key: vendor-${{ hashFiles('vendor.py', 'requirements.txt') }}
+
+      - name: Vendor external assets
+        if: steps.vendor-cache.outputs.cache-hit != 'true'
+        run: python vendor.py
+
+      - name: Verify vendor assets
+        run: python vendor.py --check
+
+      # ── Run data pipeline ─────────────────────────────────────────────────
+      - name: Run pipeline
+        run: python pipeline.py
+        env:
+          PYTHONUNBUFFERED: "1"
+
+      # ── Sanity checks ─────────────────────────────────────────────────────
+      - name: Verify output
+        run: |
+          if [ ! -f docs/index.html ]; then
+            echo "::error::docs/index.html was not produced"
+            exit 1
+          fi
+          SIZE=$(wc -c < docs/index.html)
+          echo "docs/index.html — ${SIZE} bytes"
+
+          if ! grep -q "DASHBOARD_DATA" docs/index.html; then
+            echo "::error::DASHBOARD_DATA was not injected into docs/index.html"
+            exit 1
+          fi
+
+      # ── Commit (push to main only) ────────────────────────────────────────
+      - name: Commit compiled dashboard
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/
+          if git diff --cached --quiet; then
+            echo "No changes — skipping commit"
+          else
+            TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
+            git commit -m "chore: rebuild dashboard [${TIMESTAMP}]"
+            git push
+          fi
+
+      # ── Purge Cloudflare cache ────────────────────────────────────────────
+      - name: Purge Cloudflare cache
+        if: >
+          github.event_name != 'pull_request' &&
+          github.ref == 'refs/heads/main' &&
+          secrets.CLOUDFLARE_ZONE_ID != '' &&
+          secrets.CLOUDFLARE_API_TOKEN != ''
+        env:
+          CF_ZONE: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          SITE_URL: ${{ vars.SITE_URL }}
+        run: |
+          BASE="${SITE_URL:-https://mdl.peculiarventures.com}"
+          PAYLOAD=$(jq -n --arg base "$BASE" \
+            '{"files": [$base+"/", $base+"/index.html"]}')
+
+          HTTP=$(curl -s -o /tmp/cf_purge.json -w "%{http_code}" \
+            -X POST "https://api.cloudflare.com/client/v4/zones/${CF_ZONE}/purge_cache" \
+            -H "Authorization: Bearer ${CF_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+
+          cat /tmp/cf_purge.json
+          [ "$HTTP" = "200" ] && echo "Cache purged." || echo "::warning::Purge returned HTTP ${HTTP}"
