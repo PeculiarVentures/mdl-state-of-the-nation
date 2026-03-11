@@ -1,0 +1,1288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>mDL State of the Nation — Peculiar Ventures</title>
+    <meta name="description" content="Interactive dashboard tracking mDL deployment across US jurisdictions — root certificate discovery, AAMVA VICAL verification, and population coverage.">
+    <link rel="stylesheet" href="assets/fonts/fonts.css">
+    <script src="assets/js/d3.min.js"></script>
+    <script src="assets/js/topojson-client.min.js"></script>
+    <link rel="stylesheet" href="assets/peculiar/peculiar.css">
+    <script type="module" src="assets/peculiar/peculiar.esm.js"></script>
+    <script nomodule src="assets/peculiar/peculiar.js"></script>
+    <style>
+        :root {
+            --navy: #1B2838;
+            --navy-light: #243347;
+            --navy-mid: #2a3f55;
+            --teal: #2dd4bf;
+            --teal-dark: #14b8a6;
+            --teal-muted: rgba(45, 212, 191, 0.12);
+            --amber: #f59e0b;
+            --red: #ef4444;
+            --sky: #0ea5e9;
+            --violet: #8b5cf6;
+            --slate-50: #f8fafc;
+            --slate-100: #f1f5f9;
+            --slate-200: #e2e8f0;
+            --slate-300: #cbd5e1;
+            --slate-500: #64748b;
+            --slate-700: #334155;
+            --slate-900: #0f172a;
+            --surface: #ffffff;
+            --radius: 0.75rem;
+            --radius-lg: 1rem;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+            background: var(--slate-100);
+            color: var(--slate-900);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ── Header ───────────────────────────────────── */
+        .header {
+            background: var(--navy);
+            position: relative;
+            overflow: hidden;
+        }
+        .header::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent 0%, var(--teal) 50%, transparent 100%);
+        }
+        .header-inner {
+            max-width: 1320px;
+            margin: 0 auto;
+            padding: 2.5rem 2rem 2rem;
+            position: relative;
+            z-index: 1;
+        }
+        .header-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: rgba(255,255,255,0.45);
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            margin-bottom: 0.75rem;
+        }
+        .header-brand .dot { color: var(--teal); }
+        .header h1 {
+            font-size: clamp(1.75rem, 4vw, 2.5rem);
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            background: linear-gradient(135deg, #fff 40%, var(--teal) 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            line-height: 1.15;
+        }
+        .header-sub {
+            color: rgba(255,255,255,0.55);
+            font-size: 0.95rem;
+            max-width: 640px;
+            margin-top: 0.5rem;
+        }
+        .header-meta {
+            position: absolute;
+            right: 2rem;
+            bottom: 2rem;
+            text-align: right;
+            font-size: 0.7rem;
+            color: rgba(255,255,255,0.3);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        @media (max-width: 768px) {
+            .header-meta { position: static; margin-top: 1rem; text-align: left; }
+        }
+
+        /* ── Layout ───────────────────────────────────── */
+        .container {
+            max-width: 1320px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem;
+        }
+
+        /* ── Stat Cards ──────────────────────────────── */
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .stat-card {
+            background: var(--surface);
+            border-radius: var(--radius-lg);
+            padding: 1.25rem 1.5rem;
+            border: 1px solid var(--slate-200);
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            background: var(--teal);
+            transform: scaleX(0);
+            transform-origin: left;
+            transition: transform 0.25s;
+        }
+        .stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.08); }
+        .stat-card:hover::before { transform: scaleX(1); }
+        .stat-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--slate-500);
+            margin-bottom: 0.25rem;
+        }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 800;
+            color: var(--navy);
+            line-height: 1.1;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .stat-note {
+            font-size: 0.75rem;
+            color: var(--slate-500);
+            margin-top: 0.15rem;
+        }
+
+        /* ── Section panels ──────────────────────────── */
+        .panel {
+            background: var(--surface);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--slate-200);
+            overflow: hidden;
+            margin-bottom: 2rem;
+        }
+        .panel-head {
+            background: var(--navy);
+            color: white;
+            padding: 1.25rem 1.75rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }
+        .panel-title {
+            font-size: 1.15rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .panel-body { padding: 1.5rem; }
+
+        /* ── Map ─────────────────────────────────────── */
+        .map-wrap {
+            display: flex;
+            justify-content: center;
+            padding: 1rem;
+        }
+        .map-wrap svg { width: 100%; max-width: 960px; height: auto; }
+        .state-path {
+            stroke: #fff;
+            stroke-width: 0.5;
+            cursor: pointer;
+            transition: filter 0.15s, stroke-width 0.15s;
+        }
+        .state-path:hover { stroke-width: 1.5; stroke: var(--navy); filter: brightness(1.12); }
+        .state-mdl-root { fill: var(--teal); }
+        .state-mdl-noroot { fill: var(--amber); }
+        .state-none { fill: var(--slate-300); }
+        .map-legend {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.8rem;
+        }
+        .legend-swatch {
+            width: 14px; height: 14px;
+            border-radius: 3px;
+            border: 1px solid rgba(255,255,255,0.25);
+        }
+
+        /* ── Authority Grid ──────────────────────────── */
+        .auth-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+            gap: 1.25rem;
+            padding: 1.5rem;
+        }
+        @media (max-width: 480px) { .auth-grid { grid-template-columns: 1fr; } }
+
+        .auth-card {
+            border: 1px solid var(--slate-200);
+            border-radius: var(--radius);
+            overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+            background: var(--surface);
+        }
+        .auth-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+            border-color: var(--teal);
+        }
+        .auth-card-head {
+            padding: 1.25rem 1.25rem 1rem;
+            border-bottom: 1px solid var(--slate-200);
+            position: relative;
+        }
+        .auth-card-head.has-roots {
+            background: linear-gradient(135deg, #f0fdfa, #ccfbf1);
+        }
+        .auth-card-head.no-roots {
+            background: linear-gradient(135deg, var(--slate-50), var(--slate-100));
+        }
+        .auth-name {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: var(--slate-900);
+            margin-bottom: 0.5rem;
+        }
+        .auth-badges {
+            display: flex;
+            gap: 0.35rem;
+            flex-wrap: wrap;
+        }
+        .badge {
+            display: inline-block;
+            padding: 0.15rem 0.55rem;
+            border-radius: 999px;
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .badge-tsa { background: var(--teal); color: var(--navy); }
+        .badge-aamva { background: var(--sky); color: #fff; }
+        .badge-web { background: var(--violet); color: #fff; }
+        .badge-wallet {
+            background: var(--slate-100);
+            color: var(--slate-700);
+            border: 1px solid var(--slate-200);
+            font-weight: 500;
+            text-transform: none;
+        }
+        .root-count-pip {
+            position: absolute;
+            top: 1rem; right: 1rem;
+            width: 2rem; height: 2rem;
+            border-radius: 50%;
+            background: var(--teal);
+            color: var(--navy);
+            font-weight: 800;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid white;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+        }
+        .auth-card-body { padding: 1.25rem; }
+        .root-item {
+            padding: 0.75rem;
+            border: 1px solid var(--slate-200);
+            border-radius: var(--radius);
+            margin-bottom: 0.5rem;
+            cursor: default;
+            transition: border-color 0.15s, background 0.15s;
+        }
+        .root-item:hover {
+            border-color: var(--teal);
+            background: var(--slate-50);
+        }
+        .root-item:last-child { margin-bottom: 0; }
+        .root-cn {
+            font-weight: 600;
+            font-size: 0.875rem;
+            color: var(--slate-900);
+            margin-bottom: 0.25rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .root-meta {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+            font-size: 0.72rem;
+            color: var(--slate-500);
+        }
+        .root-meta code {
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--slate-100);
+            padding: 0.1rem 0.35rem;
+            border-radius: 4px;
+            font-size: 0.68rem;
+        }
+        .status-valid { color: var(--teal-dark); font-weight: 600; }
+        .status-expired { color: var(--red); font-weight: 600; }
+        .tag-chip {
+            display: inline-block;
+            padding: 0.1rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.65rem;
+            font-weight: 600;
+        }
+        .tag-EJBCA { background: rgba(139,92,246,0.12); color: var(--violet); }
+        .tag-ADCS { background: var(--teal-muted); color: var(--teal-dark); }
+        .tag-Entrust { background: var(--teal-muted); color: var(--teal-dark); }
+
+        .no-roots-msg {
+            text-align: center;
+            padding: 1.5rem;
+            color: var(--slate-500);
+            font-size: 0.9rem;
+        }
+
+        /* ── Data source cards ───────────────────────── */
+        .sources-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .source-card {
+            background: var(--surface);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--slate-200);
+            padding: 1.5rem;
+        }
+        .source-card h3 {
+            font-size: 1rem;
+            font-weight: 700;
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--slate-200);
+        }
+        .source-detail {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+            font-size: 0.8rem;
+        }
+        .source-detail dt {
+            color: var(--slate-500);
+            font-weight: 600;
+        }
+        .source-detail dd {
+            color: var(--slate-900);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            word-break: break-all;
+        }
+
+        /* ── Charts ──────────────────────────────────── */
+        .chart-tabs {
+            display: flex;
+            gap: 0.35rem;
+            background: rgba(255,255,255,0.1);
+            padding: 0.35rem;
+            border-radius: var(--radius);
+        }
+        .chart-tab {
+            background: transparent;
+            border: none;
+            color: rgba(255,255,255,0.65);
+            padding: 0.4rem 0.85rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.8rem;
+            font-family: inherit;
+            transition: all 0.15s;
+        }
+        .chart-tab:hover { background: rgba(255,255,255,0.15); color: #fff; }
+        .chart-tab.active { background: #fff; color: var(--teal-dark); }
+        .chart-area { min-height: 420px; position: relative; }
+        .chart-view { display: none; }
+        .chart-view.active { display: block; }
+        .chart-area svg { width: 100%; height: auto; }
+        .gantt-bar { cursor: pointer; transition: filter 0.15s; }
+        .gantt-bar:hover { filter: brightness(1.15); }
+
+        /* ── Search / Filter ─────────────────────────── */
+        .filter-bar {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .filter-bar input {
+            padding: 0.6rem 1rem;
+            border: 2px solid var(--slate-200);
+            border-radius: var(--radius);
+            font-size: 0.85rem;
+            font-family: inherit;
+            width: 260px;
+            max-width: 100%;
+            transition: border-color 0.2s;
+        }
+        .filter-bar input:focus {
+            outline: none;
+            border-color: var(--teal);
+        }
+        .download-btn {
+            background: rgba(255,255,255,0.15);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.25);
+            padding: 0.5rem 1rem;
+            border-radius: var(--radius);
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+            transition: background 0.15s;
+        }
+        .download-btn:hover { background: rgba(255,255,255,0.25); }
+        .download-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* ── Tooltip ─────────────────────────────────── */
+        .tooltip {
+            position: fixed;
+            background: var(--navy);
+            color: white;
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            pointer-events: none;
+            z-index: 999;
+            opacity: 0;
+            transition: opacity 0.15s;
+            max-width: 260px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+        }
+        .tooltip.visible { opacity: 1; }
+        .tooltip strong { display: block; margin-bottom: 0.15rem; }
+
+        /* ── Cert Viewer Modal ─────────────────────── */
+        .cert-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(27, 40, 56, 0.75);
+            backdrop-filter: blur(6px);
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+        }
+        .cert-modal.visible { display: flex; }
+        .cert-modal-inner {
+            background: var(--slate-50);
+            border-radius: var(--radius-lg);
+            width: 100%;
+            max-width: 900px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.25);
+            animation: slideUp 0.3s ease;
+        }
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .cert-modal-head {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--slate-200);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--surface);
+            border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+        }
+        .cert-modal-title {
+            font-weight: 700;
+            font-size: 1rem;
+            color: var(--slate-900);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+            margin-right: 1rem;
+        }
+        .cert-modal-close {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--slate-500);
+            padding: 0.25rem;
+            border-radius: 6px;
+            line-height: 1;
+            transition: all 0.15s;
+        }
+        .cert-modal-close:hover {
+            background: var(--slate-100);
+            color: var(--slate-900);
+        }
+        .cert-modal-body {
+            padding: 1.5rem;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        /* ── Cert Info Grid (pure-data viewer) ───────── */
+        .cert-info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .cert-info-cell {
+            padding: 0.75rem 1rem;
+            background: var(--surface);
+            border: 1px solid var(--slate-200);
+            border-radius: 8px;
+        }
+        .cert-info-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--slate-500);
+            margin-bottom: 0.25rem;
+        }
+        .cert-info-value {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--slate-900);
+        }
+
+        /* ── Footer ──────────────────────────────────── */
+        .footer {
+            text-align: center;
+            padding: 2rem;
+            font-size: 0.75rem;
+            color: var(--slate-500);
+        }
+        .footer a { color: var(--teal-dark); text-decoration: none; }
+        .footer a:hover { text-decoration: underline; }
+
+        /* ── Loading ─────────────────────────────────── */
+        .loading-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 50vh;
+            gap: 1rem;
+        }
+        .spinner {
+            width: 40px; height: 40px;
+            border: 3px solid var(--slate-200);
+            border-top-color: var(--teal);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Nist line ───────────────────────────────── */
+        .nist-line { stroke: var(--red); stroke-width: 1.5; stroke-dasharray: 5,5; }
+
+        /* ── Mobile responsiveness ───────────────────────────────── */
+        @media (max-width: 640px) {
+            .header-inner { padding: 1.5rem 1rem 1.25rem; }
+            .header h1 { font-size: 1.5rem; }
+            .header-sub { font-size: 0.85rem; }
+            .container { padding: 1rem 0.75rem; }
+            .stats-row { grid-template-columns: repeat(2, 1fr); gap: 0.65rem; }
+            .stat-card { padding: 0.9rem 1rem; }
+            .stat-value { font-size: 1.5rem; }
+            .panel-head { padding: 1rem 1.1rem; flex-direction: column; align-items: flex-start; }
+            .panel-body { padding: 1rem; }
+            .panel-title { font-size: 1rem; }
+            .chart-tabs { width: 100%; display: flex; }
+            .chart-tab { flex: 1; text-align: center; padding: 0.4rem 0.5rem; font-size: 0.75rem; }
+            .sources-row { grid-template-columns: 1fr; }
+            .auth-grid { grid-template-columns: 1fr !important; }
+            .auth-card-head { padding: 0.85rem 1rem; }
+            .auth-name { font-size: 0.95rem; }
+            .root-meta { flex-wrap: wrap; gap: 0.25rem; font-size: 0.65rem; }
+            .root-meta code { font-size: 0.6rem; }
+            .download-btn { width: 100%; justify-content: center; }
+            #auth-search { width: 100% !important; }
+            .map-legend { gap: 0.6rem; }
+            .legend-item { font-size: 0.72rem; }
+            .cert-modal-inner { margin: 0.5rem; border-radius: 0.75rem; max-height: 95vh; }
+            .cert-modal-body { padding: 0.75rem; }
+        }
+        @media (max-width: 480px) {
+            .stat-value { font-size: 1.35rem; }
+        }
+        @media (min-width: 641px) and (max-width: 900px) {
+            .stats-row { grid-template-columns: repeat(3, 1fr); }
+            .auth-grid { grid-template-columns: repeat(2, 1fr) !important; }
+        }
+    </style>
+</head>
+<body>
+
+<header class="header">
+    <div class="header-inner">
+        <div class="header-brand">
+            <a href="https://peculiarventures.com" target="_blank" style="color:inherit;text-decoration:none;">Peculiar Ventures</a>
+            <span class="dot">&middot;</span>
+            <span>Companion to mDL Meets the WebPKI Ecosystem</span>
+        </div>
+        <h1>mDL State of the Nation</h1>
+        <p class="header-sub">Root certificate discovery, AAMVA VICAL verification, and population coverage across US jurisdictions.</p>
+        <div class="header-meta">
+            <div id="generated-time">Loading...</div>
+            <div>Pipeline v<span id="pipeline-version">–</span></div>
+        </div>
+    </div>
+</header>
+
+<div class="container" id="app">
+    <div class="loading-wrap" id="loading">
+        <div class="spinner"></div>
+        <div style="color: var(--slate-500); font-size: 0.9rem;">Loading dashboard data…</div>
+    </div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<div class="cert-modal" id="cert-modal">
+    <div class="cert-modal-inner">
+        <div class="cert-modal-head">
+            <div class="cert-modal-title" id="cert-modal-title">Certificate Details</div>
+            <button class="cert-modal-close" onclick="closeCertModal()" title="Close (Esc)">&times;</button>
+        </div>
+        <div class="cert-modal-body" id="cert-modal-body"></div>
+    </div>
+</div>
+
+<script id="inline-data">window.DASHBOARD_DATA = {"_generated":"2026-03-11T07:49:52.232369+00:00","_pipeline_version":"1.0.0","stats":{"tsa_recognized":22,"vical_authorities":10,"web_discovered":4,"total_roots":23,"root_coverage_pct":59.1,"population_coverage_pct":46.6},"vical_meta":{"vical_provider":"AAMVA","date":"2026-03-10T21:55:50+00:00","next_update":"2026-03-11T21:55:50+00:00","vical_issue_id":807444,"version":"1.0"},"map_states":{"LA":"mdl_no_root","WV":"mdl_no_root","PR":"mdl_with_root","ND":"mdl_with_root","NY":"mdl_no_root","OH":"mdl_no_root","GA":"mdl_with_root","AK":"mdl_with_root","IL":"mdl_with_root","UT":"mdl_with_root","CO":"mdl_with_root","IA":"mdl_no_root","HI":"mdl_with_root","CA":"mdl_with_root","VA":"mdl_with_root","MD":"mdl_with_root","KY":"mdl_no_root","MT":"mdl_with_root","AZ":"mdl_with_root","AR":"mdl_no_root","ID":"mdl_no_root","NM":"mdl_no_root"},"authorities":[{"name":"Alaska","abbr":"AK","sources":["TSA","AAMVA"],"eligible_ids":["AK DL","AK ID"],"roots":[{"fingerprint_sha256":"f0da3dbe4305223e792414c5de5202546e30dc07c3b16a4b8b1e21c444ae9c5c","subject_cn":"Alaska DMV IACA","subject_full":"C=US,ST=AK,O=Alaska DMV,CN=Alaska DMV IACA","not_before":"2025-02-12T23:22:38+00:00","not_after":"2035-02-10T23:22:37+00:00","algorithm":"ECDSA","key_detail":"secp384r1","tags":["EJBCA"],"state":"AK","source":"AAMVA"}]},{"name":"Arkansas","abbr":"AR","sources":["TSA"],"eligible_ids":["AR DL","AR ID"],"roots":[]},{"name":"Arizona","abbr":"AZ","sources":["TSA","AAMVA"],"eligible_ids":["AZ DL","AZ ID"],"roots":[{"fingerprint_sha256":"93f7586782af84ea591c58f11dd1b46ee66090a5c1701f5baea217898469e218","subject_cn":"MVMProdCA","subject_full":"L=Phoenix,ST=US-AZ,C=US,OU=IT,O=Arizona Department of Transportation,CN=MVMProdCA","not_before":"2024-08-16T17:48:17+00:00","not_after":"2034-08-16T17:48:17+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":[],"state":"AZ","source":"AAMVA"},{"fingerprint_sha256":"f8527ee48b7ad34679d1715e5d9d5fe1ab806d0477fccfa1e085b053c612b608","subject_cn":"MVMProdCA","subject_full":"L=Phoenix,ST=US-AZ,C=US,OU=IT,O=Arizona Department of Transportation,CN=MVMProdCA","not_before":"2024-08-16T17:45:23+00:00","not_after":"2034-08-16T17:45:23+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":[],"state":"AZ","source":"AAMVA"},{"fingerprint_sha256":"642a941b0ea4ad96ed55667ecf134d17a6941fab4faf59f5d420fc325175b500","subject_cn":"MVMProdCA","subject_full":"L=Phoenix,ST=US-AZ,C=US,OU=IT,O=Arizona Department of Transportation,CN=MVMProdCA","not_before":"2024-08-16T17:40:19+00:00","not_after":"2034-08-16T17:40:19+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":[],"state":"AZ","source":"AAMVA"},{"fingerprint_sha256":"ce5e1844eb2f1453232a04ab5850ce264ae27ad940b4d13f47ccd7446a516ffd","subject_cn":"SamsungIACA","subject_full":"L=Phoenix,ST=US-AZ,C=US,OU=IT,O=Arizona Department of Transportation,CN=SamsungIACA","not_before":"2025-12-15T18:27:11+00:00","not_after":"2035-12-15T18:27:11+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":[],"state":"AZ","source":"AAMVA"},{"fingerprint_sha256":"cba92976e03a40064f0f6f37f4b2a9ef039487951dd1125f59a099be305ee463","subject_cn":"GoogleIACA","subject_full":"L=Phoenix,ST=US-AZ,C=US,OU=IT,O=Arizona Department of Transportation,CN=GoogleIACA","not_before":"2025-12-15T18:25:37+00:00","not_after":"2035-12-15T18:25:37+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":[],"state":"AZ","source":"AAMVA"},{"fingerprint_sha256":"116d21b707180295329d9c3835f7fdaa3d58a945a2635987abed985e28524ab4","subject_cn":"AzWalletIACA","subject_full":"L=Phoenix,ST=US-AZ,C=US,OU=IT,O=Arizona Department of Transportation,CN=AzWalletIACA","not_before":"2025-12-15T18:21:22+00:00","not_after":"2035-12-15T18:21:22+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":[],"state":"AZ","source":"AAMVA"},{"fingerprint_sha256":"1f3a4a6fe42ca4b2f64b4957971607b3ecd62406e0631721168f02aafd9f6b8a","subject_cn":"AvocetIACA","subject_full":"L=Phoenix,ST=US-AZ,C=US,OU=IT,O=Arizona Department of Transportation,CN=AvocetIACA","not_before":"2025-12-15T18:23:58+00:00","not_after":"2035-12-15T18:23:58+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":[],"state":"AZ","source":"AAMVA"}]},{"name":"California","abbr":"CA","sources":["TSA","Web"],"eligible_ids":["CA DL","CA ID"],"roots":[{"fingerprint_sha256":"aeca3c4494a6b66ad32805ce9391388fd3b4b0890e420ea62fc2b097cea23c5d","subject_cn":"California DMV IACA Root","subject_full":"CN=California DMV IACA Root,O=CA-DMV,ST=US-CA,C=US","not_before":"2023-03-01T17:17:39+00:00","not_after":"2033-01-07T17:17:39+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":[],"state":"CA","source":"Web"}]},{"name":"Colorado","abbr":"CO","sources":["TSA","AAMVA"],"eligible_ids":["CO DL","CO ID"],"roots":[{"fingerprint_sha256":"7fcf25e9a07f7114159521946e3d475f0ed7f6490e116e10665c31a782a313b0","subject_cn":"Colorado Root Certificate","subject_full":"CN=Colorado Root Certificate,OU=CO DRIVES,O=Colorado Department of Revenue,L=Denver,C=US,ST=US-CO","not_before":"2024-10-29T06:00:00+00:00","not_after":"2029-10-29T06:00:00+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":["ADCS"],"state":"CO","source":"AAMVA"},{"fingerprint_sha256":"6468ba616a6de1f543bf16e9c75882a64df2d0bb7e38b197caf2441dbc60e232","subject_cn":"Colorado Root Certificate","subject_full":"CN=Colorado Root Certificate,OU=CO DRIVES,O=Colorado Department of Revenue,L=Denver,C=US,ST=US-CO","not_before":"2026-01-12T07:00:00+00:00","not_after":"2031-01-12T07:00:00+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":["ADCS"],"state":"CO","source":"AAMVA"}]},{"name":"Georgia","abbr":"GA","sources":["TSA","AAMVA","Web"],"eligible_ids":["GA DL","GA ID"],"roots":[{"fingerprint_sha256":"9181aaa38802325b25e6d5aac973370aafc1a1561c4f1bae03a8bcf0bdaac0fc","subject_cn":"Georgia Root Certificate Authority","subject_full":"CN=Georgia Root Certificate Authority,OU=DRIVES,O=Georgia Department of Driver Services,L=Conyers,C=US,ST=US-GA","not_before":"2024-03-20T04:00:00+00:00","not_after":"2029-03-20T04:00:00+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":["ADCS"],"state":"GA","source":"AAMVA"}]},{"name":"Hawaii","abbr":"HI","sources":["TSA","Web"],"eligible_ids":["HI DL","HI ID"],"roots":[{"fingerprint_sha256":"25bd462a463b6fe838fbcb1a214c74081e6e858f06cd18f4a8cff93605315234","subject_cn":"HI_IACA_Prod","subject_full":"L=Honolulu,CN=HI_IACA_Prod,ST=US-HI,OU=State of Hawaii,O=Department of Transportation,C=US","not_before":"2024-06-05T21:37:24+00:00","not_after":"2034-06-03T22:37:24+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":[],"state":"HI","source":"Web"}]},{"name":"Iowa","abbr":"IA","sources":["TSA"],"eligible_ids":["IA DL","IA ID"],"roots":[]},{"name":"Idaho","abbr":"ID","sources":["TSA"],"eligible_ids":["ID DL","ID ID"],"roots":[]},{"name":"Illinois","abbr":"IL","sources":["TSA","AAMVA"],"eligible_ids":["IL DL","IL ID"],"roots":[{"fingerprint_sha256":"9e8b5e18ffe9d27e9ce70eb7435dc7b72ea2a77155614d4adb96a07c4f7e8169","subject_cn":"Prod IACA Root","subject_full":"CN=Prod IACA Root,OU=IT,O=Illinois Secretary of State,L=Springfield,ST=US-IL,C=US","not_before":"2025-09-18T19:46:46+00:00","not_after":"2044-09-18T19:46:46+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":[],"state":"IL","source":"AAMVA"}]},{"name":"Kentucky","abbr":"KY","sources":["TSA"],"eligible_ids":["KY DL","KY ID"],"roots":[]},{"name":"Louisiana","abbr":"LA","sources":["TSA"],"eligible_ids":["LA DL","LA ID"],"roots":[]},{"name":"Maryland","abbr":"MD","sources":["TSA","AAMVA"],"eligible_ids":["MD DL","MD ID"],"roots":[{"fingerprint_sha256":"ecb8862894fd0b3098b1b7cd2d61193da161bf41b0467afc877819ab745d877a","subject_cn":"Fast Enterprises Root","subject_full":"CN=Fast Enterprises Root,O=Maryland MVA,L=Glen Burnie,C=US,ST=US-MD","not_before":"2024-01-05T05:00:00+00:00","not_after":"2029-01-04T05:00:00+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":["ADCS"],"state":"MD","source":"AAMVA"},{"fingerprint_sha256":"b6dbcf05d84474d02fe4ed5b56d4e1f68d7190c1e4a6e72094993aa8bdba63aa","subject_cn":"MDOT MVA mDL Root","subject_full":"CN=MDOT MVA mDL Root,O=Maryland MVA,L=Glen Burnie,C=US,ST=US-MD","not_before":"2025-06-18T06:00:00+00:00","not_after":"2030-06-18T06:00:00+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":["ADCS"],"state":"MD","source":"AAMVA"}]},{"name":"Montana","abbr":"MT","sources":["TSA","AAMVA"],"eligible_ids":["MT DL","MT ID"],"roots":[{"fingerprint_sha256":"d0f9f9ac7ec847c245b5d7ba106c31dd727b31c8c5e658a153bde83af5c347cf","subject_cn":"carswsnp.dojmt.gov","subject_full":"CN=carswsnp.dojmt.gov,OU=Montana Motor Vehicle Division,O=Montana Department of Justice,L=Helena,C=US,ST=US-MT","not_before":"2025-05-02T06:00:00+00:00","not_after":"2030-05-02T06:00:00+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":["ADCS"],"state":"MT","source":"AAMVA"}]},{"name":"North Dakota","abbr":"ND","sources":["TSA","AAMVA"],"eligible_ids":["ND DL","ND ID"],"roots":[{"fingerprint_sha256":"47d92245a85b1a34808f5eb08f7289f43a7de864d7a076718596580aad48c962","subject_cn":"https://partner.mdl.dot.nd.gov/","subject_full":"CN=https://partner.mdl.dot.nd.gov/,OU=LEGEND,O=North Dakota Department of Transportation,L=Bismarck,C=US,ST=US-ND","not_before":"2025-06-10T06:00:00+00:00","not_after":"2030-06-10T06:00:00+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":["ADCS"],"state":"ND","source":"AAMVA"}]},{"name":"New Mexico","abbr":"NM","sources":["TSA"],"eligible_ids":["NM DL","NM ID"],"roots":[]},{"name":"New York","abbr":"NY","sources":["TSA"],"eligible_ids":["NY DL","NY ID"],"roots":[]},{"name":"Ohio","abbr":"OH","sources":["TSA"],"eligible_ids":["OH DL","OH ID"],"roots":[]},{"name":"Puerto Rico","abbr":"PR","sources":["TSA","Web"],"eligible_ids":["PR DL","PR ID"],"roots":[{"fingerprint_sha256":"ded9020bea46090c7540724a69fbb50e814d5ea45333dfe1a78a3cd2a7f27270","subject_cn":"PRDTOP-MDL-PROD-CA","subject_full":"L=San Juan,CN=PRDTOP-MDL-PROD-CA,ST=US-PR,O=PR Department of Transportation and Public Works,C=US","not_before":"2024-06-03T20:11:38+00:00","not_after":"2029-06-03T21:11:38+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":[],"state":"PR","source":"Web"}]},{"name":"Utah","abbr":"UT","sources":["TSA","AAMVA"],"eligible_ids":["UT DL","UT ID"],"roots":[{"fingerprint_sha256":"d73a055f1f43de614c6e21b52002bf92bd4afb54ba7cb885d447063ce2f857df","subject_cn":"IACA-UTAH-USA","subject_full":"C=US,ST=US-UT,O=Utah DLD,CN=IACA-UTAH-USA","not_before":"2023-12-18T12:25:47+00:00","not_after":"2032-12-15T12:25:46+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":[],"state":"UT","source":"AAMVA"},{"fingerprint_sha256":"0ba07f2f83084a82ff7090859c534ef52a394be38acd18e1b0973ce7ae95376e","subject_cn":"IACA-UTAH-USA","subject_full":"C=US,ST=US-UT,O=Utah DLD,CN=IACA-UTAH-USA","not_before":"2025-03-11T12:49:25+00:00","not_after":"2034-06-07T12:49:24+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":[],"state":"UT","source":"AAMVA"}]},{"name":"Virginia","abbr":"VA","sources":["TSA","AAMVA"],"eligible_ids":["VA DL","VA ID"],"roots":[{"fingerprint_sha256":"314a68ebb7b13f20885631eb5ceb5d9855e285722eadfdb85a21788387b184b8","subject_cn":"VA mID IACA","subject_full":"C=US,ST=US-VA,CN=VA mID IACA","not_before":"2024-01-11T18:20:55+00:00","not_after":"2026-01-10T18:20:55+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":[],"state":"VA","source":"AAMVA"},{"fingerprint_sha256":"deb6959d588118ce374444995837ef8ee5cca78c2610542945de58839e16c26a","subject_cn":"VA mID IACA-A","subject_full":"C=US,ST=US-VA,CN=VA mID IACA-A","not_before":"2025-07-22T13:26:02+00:00","not_after":"2027-07-22T13:26:01+00:00","algorithm":"ECDSA","key_detail":"secp256r1","tags":[],"state":"VA","source":"AAMVA"}]},{"name":"West Virginia","abbr":"WV","sources":["TSA"],"eligible_ids":["WV DL","WV ID"],"roots":[]}],"_pem_bundle":[{"state":"AK","subject_cn":"Alaska DMV IACA","pem":"-----BEGIN CERTIFICATE-----\nMIIDcDCCAvagAwIBAgIUX9Ek9pKNP/yYUYu9pf6pyxFM2M4wCgYIKoZIzj0EAwMw\nSTEYMBYGA1UEAwwPQWxhc2thIERNViBJQUNBMRMwEQYDVQQKDApBbGFza2EgRE1W\nMQswCQYDVQQIDAJBSzELMAkGA1UEBhMCVVMwHhcNMjUwMjEyMjMyMjM4WhcNMzUw\nMjEwMjMyMjM3WjBJMRgwFgYDVQQDDA9BbGFza2EgRE1WIElBQ0ExEzARBgNVBAoM\nCkFsYXNrYSBETVYxCzAJBgNVBAgMAkFLMQswCQYDVQQGEwJVUzB2MBAGByqGSM49\nAgEGBSuBBAAiA2IABDMUuKt2Met/TjeB0klqsmfJyBiyc6liSk8s/R2FSwWJT10A\nzaWq3t77Fzl5xrUJfXrZOgmAad+R79nfCDKEw9nOUDyPxwnK+x1Tf56IyV9HEV9S\n5OweERm+HnOLqcYblqOCAZ0wggGZMBIGA1UdEwEB/wQIMAYBAf8CAQAwHwYDVR0j\nBBgwFoAUnG/8jgGkyjyKsmmZHwRklS8YxNQwMQYDVR0SBCowKIEmdXMuZGlzLm5v\ncmFtLml0LmFkbWluc0B0aGFsZXNncm91cC5jb20wMQYDVR0RBCowKIEmdXMuZGlz\nLm5vcmFtLml0LmFkbWluc0B0aGFsZXNncm91cC5jb20wgbAGA1UdHwSBqDCBpTCB\noqCBn6CBnIaBmWh0dHA6Ly9pc3N1aW5nLmFrbWRsLnVzLmFwcC5hei5rZXlmYWN0\nb3JzYWFzLmNvbS9lamJjYS9wdWJsaWN3ZWIvd2ViZGlzdC9jZXJ0ZGlzdD9jbWQ9\nY3JsJmlzc3Vlcj1DTiUzREFsYXNrYStETVYrSUFDQSUyQ08lM0RBbGFza2ErRE1W\nJTJDU1QlM0RBSyUyQ0MlM0RVUzAdBgNVHQ4EFgQUnG/8jgGkyjyKsmmZHwRklS8Y\nxNQwGgYDVR0QBBMwEYEPMjAzMzAyMTAyMzIyMzhaMA4GA1UdDwEB/wQEAwIBBjAK\nBggqhkjOPQQDAwNoADBlAjBo/GoIeq0E6ZJAxUtMfyj3IYsXu9Aucg28yTfDAR0J\n8sqH18j3H9YThID1rFWT3+ECMQDlUAUD4AOg8BdCV9MJoBEMQXXPwa/NxLpRSrps\nhflgNiPYiTEagDl2oH5AglotZmU=\n-----END CERTIFICATE-----\n"},{"state":"AZ","subject_cn":"MVMProdCA","pem":"-----BEGIN CERTIFICATE-----\nMIIDBzCCAqygAwIBAgIUdBfQKZnHSlxQkyUoTuucN+EQXOMwCgYIKoZIzj0EAwIw\nfzESMBAGA1UEAwwJTVZNUHJvZENBMS0wKwYDVQQKDCRBcml6b25hIERlcGFydG1l\nbnQgb2YgVHJhbnNwb3J0YXRpb24xCzAJBgNVBAsMAklUMQswCQYDVQQGEwJVUzEO\nMAwGA1UECAwFVVMtQVoxEDAOBgNVBAcMB1Bob2VuaXgwHhcNMjQwODE2MTc0ODE3\nWhcNMzQwODE2MTc0ODE3WjB/MRIwEAYDVQQDDAlNVk1Qcm9kQ0ExLTArBgNVBAoM\nJEFyaXpvbmEgRGVwYXJ0bWVudCBvZiBUcmFuc3BvcnRhdGlvbjELMAkGA1UECwwC\nSVQxCzAJBgNVBAYTAlVTMQ4wDAYDVQQIDAVVUy1BWjEQMA4GA1UEBwwHUGhvZW5p\neDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABCyuq/xwpmVAcoeIObjy1vvsWzMc\nivIIpfF6CxVyYoOQ7Dnu+dUEhqRKVrLMnzhoqDgKetzVHS4JQLCatOyus0CjggEE\nMIIBADAdBgNVHQ4EFgQUM0IsGLh/yqQ73mhM6h25/AsFp30wHwYDVR0jBBgwFoAU\nM0IsGLh/yqQ73mhM6h25/AsFp30wEgYDVR0TAQH/BAgwBgEB/wIBADAOBgNVHQ8B\nAf8EBAMCAQYwLAYDVR0SBCUwI4YhaHR0cHM6Ly9hemRvdC5nb3YvbXZkL2NvbnRh\nY3QtbXZkMGwGA1UdHwRlMGMwYaBfoF2GW2h0dHBzOi8vbXZtcHVibGljLmJsb2Iu\nY29yZS51c2dvdmNsb3VkYXBpLm5ldC9jZXJ0aWZpY2F0ZS1yZXZvY2F0aW9uLWxp\nc3QvTVZNUHJvZENBLmNybC5wZW0wCgYIKoZIzj0EAwIDSQAwRgIhANuxS8uit1Hq\nj75A8J8RYSVFVLFIBHkqDvePviN8ZrwWAiEAwnolRQsC2bnEbVD2fCacCsnb58Hz\n+5RDm49N0aEhIv8=\n-----END CERTIFICATE-----\n"},{"state":"AZ","subject_cn":"MVMProdCA","pem":"-----BEGIN CERTIFICATE-----\nMIIDBzCCAqygAwIBAgIUE/iacpb/xR1hy0KQHlHoHjKGzRMwCgYIKoZIzj0EAwIw\nfzESMBAGA1UEAwwJTVZNUHJvZENBMS0wKwYDVQQKDCRBcml6b25hIERlcGFydG1l\nbnQgb2YgVHJhbnNwb3J0YXRpb24xCzAJBgNVBAsMAklUMQswCQYDVQQGEwJVUzEO\nMAwGA1UECAwFVVMtQVoxEDAOBgNVBAcMB1Bob2VuaXgwHhcNMjQwODE2MTc0NTIz\nWhcNMzQwODE2MTc0NTIzWjB/MRIwEAYDVQQDDAlNVk1Qcm9kQ0ExLTArBgNVBAoM\nJEFyaXpvbmEgRGVwYXJ0bWVudCBvZiBUcmFuc3BvcnRhdGlvbjELMAkGA1UECwwC\nSVQxCzAJBgNVBAYTAlVTMQ4wDAYDVQQIDAVVUy1BWjEQMA4GA1UEBwwHUGhvZW5p\neDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABNUGhfC9l3WzXL+idfZ51dzwz4ie\nYigtGiJCGYT3CNHF9BYOWZxYPSCNgJvDKTC3B7q3Vs0pSJ6k1/EgzwooG4OjggEE\nMIIBADAdBgNVHQ4EFgQUrFA+KDiO+qv3pK27Wn8IQWsmzxUwHwYDVR0jBBgwFoAU\nrFA+KDiO+qv3pK27Wn8IQWsmzxUwEgYDVR0TAQH/BAgwBgEB/wIBADAOBgNVHQ8B\nAf8EBAMCAQYwLAYDVR0SBCUwI4YhaHR0cHM6Ly9hemRvdC5nb3YvbXZkL2NvbnRh\nY3QtbXZkMGwGA1UdHwRlMGMwYaBfoF2GW2h0dHBzOi8vbXZtcHVibGljLmJsb2Iu\nY29yZS51c2dvdmNsb3VkYXBpLm5ldC9jZXJ0aWZpY2F0ZS1yZXZvY2F0aW9uLWxp\nc3QvTVZNUHJvZENBLmNybC5wZW0wCgYIKoZIzj0EAwIDSQAwRgIhAMVvoqGUY5A4\nSLEkCpA+MTksCbKigfTEReO+44c88W+zAiEAwEMFKoWm4nD4h7bs3XoTmWxwbllG\n0nOh1tAVKRvyzM0=\n-----END CERTIFICATE-----\n"},{"state":"AZ","subject_cn":"MVMProdCA","pem":"-----BEGIN CERTIFICATE-----\nMIIDBzCCAqygAwIBAgIUO/uWVmabBSV9o4SeYj6ioDz+HSYwCgYIKoZIzj0EAwIw\nfzESMBAGA1UEAwwJTVZNUHJvZENBMS0wKwYDVQQKDCRBcml6b25hIERlcGFydG1l\nbnQgb2YgVHJhbnNwb3J0YXRpb24xCzAJBgNVBAsMAklUMQswCQYDVQQGEwJVUzEO\nMAwGA1UECAwFVVMtQVoxEDAOBgNVBAcMB1Bob2VuaXgwHhcNMjQwODE2MTc0MDE5\nWhcNMzQwODE2MTc0MDE5WjB/MRIwEAYDVQQDDAlNVk1Qcm9kQ0ExLTArBgNVBAoM\nJEFyaXpvbmEgRGVwYXJ0bWVudCBvZiBUcmFuc3BvcnRhdGlvbjELMAkGA1UECwwC\nSVQxCzAJBgNVBAYTAlVTMQ4wDAYDVQQIDAVVUy1BWjEQMA4GA1UEBwwHUGhvZW5p\neDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABFJpz6RkzZWqyVQ8CemsHjvLKY5J\nnInhby/1RHU6EErW04tvKjUSOpidfc1xcYG1pzJeCDGQPsju/LJue0vEKQKjggEE\nMIIBADAdBgNVHQ4EFgQUJkHD1SkBjqmWg4Z2gwJ8RxDI/vEwHwYDVR0jBBgwFoAU\nJkHD1SkBjqmWg4Z2gwJ8RxDI/vEwEgYDVR0TAQH/BAgwBgEB/wIBADAOBgNVHQ8B\nAf8EBAMCAQYwLAYDVR0SBCUwI4YhaHR0cHM6Ly9hemRvdC5nb3YvbXZkL2NvbnRh\nY3QtbXZkMGwGA1UdHwRlMGMwYaBfoF2GW2h0dHBzOi8vbXZtcHVibGljLmJsb2Iu\nY29yZS51c2dvdmNsb3VkYXBpLm5ldC9jZXJ0aWZpY2F0ZS1yZXZvY2F0aW9uLWxp\nc3QvTVZNUHJvZENBLmNybC5wZW0wCgYIKoZIzj0EAwIDSQAwRgIhAI1/E8XQ/v4S\nQ92sPRivZLWK9hUYz3ZCdMBvMqQX322JAiEA8Nta7T9167ux1weIgBy+66L7G5ji\nmCxjO1ECnai4Kl8=\n-----END CERTIFICATE-----\n"},{"state":"AZ","subject_cn":"SamsungIACA","pem":"-----BEGIN CERTIFICATE-----\nMIIDDjCCArSgAwIBAgIUbS0DYiTGz1IeMDHWoLivaokxT4wwCgYIKoZIzj0EAwIw\ngYExFDASBgNVBAMMC1NhbXN1bmdJQUNBMS0wKwYDVQQKDCRBcml6b25hIERlcGFy\ndG1lbnQgb2YgVHJhbnNwb3J0YXRpb24xCzAJBgNVBAsMAklUMQswCQYDVQQGEwJV\nUzEOMAwGA1UECAwFVVMtQVoxEDAOBgNVBAcMB1Bob2VuaXgwHhcNMjUxMjE1MTgy\nNzExWhcNMzUxMjE1MTgyNzExWjCBgTEUMBIGA1UEAwwLU2Ftc3VuZ0lBQ0ExLTAr\nBgNVBAoMJEFyaXpvbmEgRGVwYXJ0bWVudCBvZiBUcmFuc3BvcnRhdGlvbjELMAkG\nA1UECwwCSVQxCzAJBgNVBAYTAlVTMQ4wDAYDVQQIDAVVUy1BWjEQMA4GA1UEBwwH\nUGhvZW5peDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABKi2u7sSRIIQ5YoltS+a\nt5Wls9VtEwG9dRxcAEvMZ1YKMug445cCikpFE61SCQ3jIcMJDxElPjhfra5B5xBB\n2OOjggEGMIIBAjAdBgNVHQ4EFgQUlqF+v0cL+HjSp/mVDWPmvHC7j5YwHwYDVR0j\nBBgwFoAUlqF+v0cL+HjSp/mVDWPmvHC7j5YwEgYDVR0TAQH/BAgwBgEB/wIBADAO\nBgNVHQ8BAf8EBAMCAQYwLAYDVR0SBCUwI4YhaHR0cHM6Ly9hemRvdC5nb3YvbXZk\nL2NvbnRhY3QtbXZkMG4GA1UdHwRnMGUwY6BhoF+GXWh0dHBzOi8vbXZtcHVibGlj\nLmJsb2IuY29yZS51c2dvdmNsb3VkYXBpLm5ldC9jZXJ0aWZpY2F0ZS1yZXZvY2F0\naW9uLWxpc3QvMy9NVk1Qcm9kQ0EuY3JsLnBlbTAKBggqhkjOPQQDAgNIADBFAiAY\n+OLsMj5NHFFRrAy43grEAitSvuoA+tMgY2y12bWA9AIhALFLgHY+1Hie1360C0gf\nrLh/tIsPU3eedMQUAssm6Dhe\n-----END CERTIFICATE-----\n"},{"state":"AZ","subject_cn":"GoogleIACA","pem":"-----BEGIN CERTIFICATE-----\nMIIDDTCCArKgAwIBAgIUbh0WpHxXGCJJnLQ4CNAfO4xOetUwCgYIKoZIzj0EAwIw\ngYAxEzARBgNVBAMMCkdvb2dsZUlBQ0ExLTArBgNVBAoMJEFyaXpvbmEgRGVwYXJ0\nbWVudCBvZiBUcmFuc3BvcnRhdGlvbjELMAkGA1UECwwCSVQxCzAJBgNVBAYTAlVT\nMQ4wDAYDVQQIDAVVUy1BWjEQMA4GA1UEBwwHUGhvZW5peDAeFw0yNTEyMTUxODI1\nMzdaFw0zNTEyMTUxODI1MzdaMIGAMRMwEQYDVQQDDApHb29nbGVJQUNBMS0wKwYD\nVQQKDCRBcml6b25hIERlcGFydG1lbnQgb2YgVHJhbnNwb3J0YXRpb24xCzAJBgNV\nBAsMAklUMQswCQYDVQQGEwJVUzEOMAwGA1UECAwFVVMtQVoxEDAOBgNVBAcMB1Bo\nb2VuaXgwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQpPSXjZG/enrGvVGkdG5OU\nuw0MKbv83S5YGUG6T8E6nWxSHVBv/WZuT7d9zcQ7+P+A0QsUO9NcF1rkeZwlIiAo\no4IBBjCCAQIwHQYDVR0OBBYEFI5FIMbEqJMJrkDYob+Tww9On+o1MB8GA1UdIwQY\nMBaAFI5FIMbEqJMJrkDYob+Tww9On+o1MBIGA1UdEwEB/wQIMAYBAf8CAQAwDgYD\nVR0PAQH/BAQDAgEGMCwGA1UdEgQlMCOGIWh0dHBzOi8vYXpkb3QuZ292L212ZC9j\nb250YWN0LW12ZDBuBgNVHR8EZzBlMGOgYaBfhl1odHRwczovL212bXB1YmxpYy5i\nbG9iLmNvcmUudXNnb3ZjbG91ZGFwaS5uZXQvY2VydGlmaWNhdGUtcmV2b2NhdGlv\nbi1saXN0LzIvTVZNUHJvZENBLmNybC5wZW0wCgYIKoZIzj0EAwIDSQAwRgIhAKML\ntbOTIDtPupTiIk3+4mqA0UNTWHKQZnuluQQwF7tkAiEAogYKBobaThxeZDOXQCWS\nEEF43za4oQMD3+jmvTD6c3M=\n-----END CERTIFICATE-----\n"},{"state":"AZ","subject_cn":"AzWalletIACA","pem":"-----BEGIN CERTIFICATE-----\nMIIDETCCAragAwIBAgIUSNAJ0bZiqfgXuhhD4AIJlZjs66UwCgYIKoZIzj0EAwIw\ngYIxFTATBgNVBAMMDEF6V2FsbGV0SUFDQTEtMCsGA1UECgwkQXJpem9uYSBEZXBh\ncnRtZW50IG9mIFRyYW5zcG9ydGF0aW9uMQswCQYDVQQLDAJJVDELMAkGA1UEBhMC\nVVMxDjAMBgNVBAgMBVVTLUFaMRAwDgYDVQQHDAdQaG9lbml4MB4XDTI1MTIxNTE4\nMjEyMloXDTM1MTIxNTE4MjEyMlowgYIxFTATBgNVBAMMDEF6V2FsbGV0SUFDQTEt\nMCsGA1UECgwkQXJpem9uYSBEZXBhcnRtZW50IG9mIFRyYW5zcG9ydGF0aW9uMQsw\nCQYDVQQLDAJJVDELMAkGA1UEBhMCVVMxDjAMBgNVBAgMBVVTLUFaMRAwDgYDVQQH\nDAdQaG9lbml4MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEE4sYOLSdMehpJnRu\nGOaHJGtjXbNFaPdakUDXM5/VOq6eNoONgLXILnywZXHb5QNoK+imK99Yv6bsEqFO\nLtF3EaOCAQYwggECMB0GA1UdDgQWBBTf4EnyDX5fbTQNkSj6L0wVO02HRTAfBgNV\nHSMEGDAWgBTf4EnyDX5fbTQNkSj6L0wVO02HRTASBgNVHRMBAf8ECDAGAQH/AgEA\nMA4GA1UdDwEB/wQEAwIBBjAsBgNVHRIEJTAjhiFodHRwczovL2F6ZG90Lmdvdi9t\ndmQvY29udGFjdC1tdmQwbgYDVR0fBGcwZTBjoGGgX4ZdaHR0cHM6Ly9tdm1wdWJs\naWMuYmxvYi5jb3JlLnVzZ292Y2xvdWRhcGkubmV0L2NlcnRpZmljYXRlLXJldm9j\nYXRpb24tbGlzdC80L01WTVByb2RDQS5jcmwucGVtMAoGCCqGSM49BAMCA0kAMEYC\nIQDN42PoINqCgCe/dmvnSDpPQ/xvzC2B9P2LEoUY1OVrrwIhAMMJyZSVB9d6sgou\nSx7Ix8bnMCe9sMNEH88Z8eGK35n9\n-----END CERTIFICATE-----\n"},{"state":"AZ","subject_cn":"AvocetIACA","pem":"-----BEGIN CERTIFICATE-----\nMIIDDDCCArKgAwIBAgIUZsrctHYnbX11Hba7eSabGGo1mUwwCgYIKoZIzj0EAwIw\ngYAxEzARBgNVBAMMCkF2b2NldElBQ0ExLTArBgNVBAoMJEFyaXpvbmEgRGVwYXJ0\nbWVudCBvZiBUcmFuc3BvcnRhdGlvbjELMAkGA1UECwwCSVQxCzAJBgNVBAYTAlVT\nMQ4wDAYDVQQIDAVVUy1BWjEQMA4GA1UEBwwHUGhvZW5peDAeFw0yNTEyMTUxODIz\nNThaFw0zNTEyMTUxODIzNThaMIGAMRMwEQYDVQQDDApBdm9jZXRJQUNBMS0wKwYD\nVQQKDCRBcml6b25hIERlcGFydG1lbnQgb2YgVHJhbnNwb3J0YXRpb24xCzAJBgNV\nBAsMAklUMQswCQYDVQQGEwJVUzEOMAwGA1UECAwFVVMtQVoxEDAOBgNVBAcMB1Bo\nb2VuaXgwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAS8JnTTjt2sd2lOhldGkLYk\ntiaf5BeAR5IDWvNhNtZaWNee5EuKeSb7zKFMo7cOJ6Mf1jaEeNh3KncQKd2O4/Px\no4IBBjCCAQIwHQYDVR0OBBYEFII5tVvpzF/qpp4bdaxon2/qEUQ4MB8GA1UdIwQY\nMBaAFII5tVvpzF/qpp4bdaxon2/qEUQ4MBIGA1UdEwEB/wQIMAYBAf8CAQAwDgYD\nVR0PAQH/BAQDAgEGMCwGA1UdEgQlMCOGIWh0dHBzOi8vYXpkb3QuZ292L212ZC9j\nb250YWN0LW12ZDBuBgNVHR8EZzBlMGOgYaBfhl1odHRwczovL212bXB1YmxpYy5i\nbG9iLmNvcmUudXNnb3ZjbG91ZGFwaS5uZXQvY2VydGlmaWNhdGUtcmV2b2NhdGlv\nbi1saXN0LzEvTVZNUHJvZENBLmNybC5wZW0wCgYIKoZIzj0EAwIDSAAwRQIhAPNT\naHC5OEKZHwu/FIBYPJ9LmnmBUs7U7N/KTQ1ZI0cGAiAsE8kqyIpXVRfczTEgHxK4\nhw//tT4AAgN6x37GgUmbKQ==\n-----END CERTIFICATE-----\n"},{"state":"CA","subject_cn":"California DMV IACA Root","pem":"-----BEGIN CERTIFICATE-----\nMIICPzCCAeWgAwIBAgIUXd0okOOM5cylFwc2WNK7D2O+ArAwCgYIKoZIzj0EAwIw\nUTELMAkGA1UEBhMCVVMxDjAMBgNVBAgMBVVTLUNBMQ8wDQYDVQQKDAZDQS1ETVYx\nITAfBgNVBAMMGENhbGlmb3JuaWEgRE1WIElBQ0EgUm9vdDAeFw0yMzAzMDExNzE3\nMzlaFw0zMzAxMDcxNzE3MzlaMFExCzAJBgNVBAYTAlVTMQ4wDAYDVQQIDAVVUy1D\nQTEPMA0GA1UECgwGQ0EtRE1WMSEwHwYDVQQDDBhDYWxpZm9ybmlhIERNViBJQUNB\nIFJvb3QwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAARgzKB5QsRXYGxmIapA3ilL\noXCDxgTMI2JArA72VQ9gL2DIKkBAclKYtix7vQwUbhbH76mnmbOFSxYlCJtilfl1\no4GaMIGXMB0GA1UdDgQWBBS7fXVnknpvz59ye7gK9zcvnAxQNjASBgNVHRMBAf8E\nCDAGAQH/AgEAMA4GA1UdDwEB/wQEAwIBBjAfBgNVHRIEGDAWgRRpYWNhLXJvb3RA\nZG12LmNhLmdvdjAxBgNVHR8EKjAoMCagJKAihiBodHRwczovL2NybC5kbXYuY2Eu\nZ292L2lhY2Evcm9vdDAKBggqhkjOPQQDAgNIADBFAiAJriK4wEUzgDCK++tIIW+g\nXASUIIcG/XhBNxuk2uHd7QIhAKWC8LFaM8qFsvlujtZZf647zD8BBc6kicj1Imw/\nwujS\n-----END CERTIFICATE-----\n"},{"state":"CO","subject_cn":"Colorado Root Certificate","pem":"-----BEGIN CERTIFICATE-----\nMIIC/jCCAqWgAwIBAgIUAMLBrrtl/kiPRa3nJEt18F/kojAwCgYIKoZIzj0EAwIw\ngY8xDjAMBgNVBAgTBVVTLUNPMQswCQYDVQQGEwJVUzEPMA0GA1UEBxMGRGVudmVy\nMScwJQYDVQQKEx5Db2xvcmFkbyBEZXBhcnRtZW50IG9mIFJldmVudWUxEjAQBgNV\nBAsTCUNPIERSSVZFUzEiMCAGA1UEAxMZQ29sb3JhZG8gUm9vdCBDZXJ0aWZpY2F0\nZTAeFw0yNDEwMjkwNjAwMDBaFw0yOTEwMjkwNjAwMDBaMIGPMQ4wDAYDVQQIEwVV\nUy1DTzELMAkGA1UEBhMCVVMxDzANBgNVBAcTBkRlbnZlcjEnMCUGA1UEChMeQ29s\nb3JhZG8gRGVwYXJ0bWVudCBvZiBSZXZlbnVlMRIwEAYDVQQLEwlDTyBEUklWRVMx\nIjAgBgNVBAMTGUNvbG9yYWRvIFJvb3QgQ2VydGlmaWNhdGUwWTATBgcqhkjOPQIB\nBggqhkjOPQMBBwNCAARuuLSkdRJ4QPEFqbPHmZP8Hbu8waHHJ6wKofZgHg7fOTUT\n4r+jV+jFpM5dNCbW/mdJyJwRCEsdOs3cvGtolt5No4HcMIHZMA4GA1UdDwEB/wQE\nAwIBBjASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBRuHjVnGUTr6tI5nEkf\nnK/3EFyP2DAkBgNVHRIEHTAbhhlodHRwczovL2Rtdi5jb2xvcmFkby5nb3YvMFwG\nA1UdHwRVMFMwUaBPoE2GS2h0dHBzOi8vZGV2Lm1vYmlsZWRsLmNvbS81MHB3cy9D\nUkwvbURMLzMxOTE0YzI5OWMxMTRhMWQ4ZjE4MTRlZTExOWU1NTdhLmNybDAQBgkr\nBgEEAYPFIQEEAzUwUDAKBggqhkjOPQQDAgNHADBEAiBr2FEgBjcMyt1WPtiV1tSY\nAAcP1OxcBofI6NNZbBEXcQIgRWFaTIFbsVXVyouuTnsNCB6JykHPP03sxjkyA/Wd\n5RE=\n-----END CERTIFICATE-----\n"},{"state":"CO","subject_cn":"Colorado Root Certificate","pem":"-----BEGIN CERTIFICATE-----\nMIIDBTCCAqqgAwIBAgIUAOugsa1Q/HPTqJH2JzwqYc+xIiwwCgYIKoZIzj0EAwIw\ngY8xDjAMBgNVBAgTBVVTLUNPMQswCQYDVQQGEwJVUzEPMA0GA1UEBxMGRGVudmVy\nMScwJQYDVQQKEx5Db2xvcmFkbyBEZXBhcnRtZW50IG9mIFJldmVudWUxEjAQBgNV\nBAsTCUNPIERSSVZFUzEiMCAGA1UEAxMZQ29sb3JhZG8gUm9vdCBDZXJ0aWZpY2F0\nZTAeFw0yNjAxMTIwNzAwMDBaFw0zMTAxMTIwNzAwMDBaMIGPMQ4wDAYDVQQIEwVV\nUy1DTzELMAkGA1UEBhMCVVMxDzANBgNVBAcTBkRlbnZlcjEnMCUGA1UEChMeQ29s\nb3JhZG8gRGVwYXJ0bWVudCBvZiBSZXZlbnVlMRIwEAYDVQQLEwlDTyBEUklWRVMx\nIjAgBgNVBAMTGUNvbG9yYWRvIFJvb3QgQ2VydGlmaWNhdGUwWTATBgcqhkjOPQIB\nBggqhkjOPQMBBwNCAARpmJDBqJ1T2ymnCdge5BUvG9FH8+3LLXKZ1K/o0fiB2+g0\nZXitRtgi4krPZfCzB3DjHbXKzRIhvM/RTTZVuieSo4HhMIHeMA4GA1UdDwEB/wQE\nAwIBBjASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBSvH8DaOrSu7F+2Vj5z\nrnthUGGxEjAkBgNVHRIEHTAbhhlodHRwczovL2R3cy5jb2xvcmFkby5nb3YvMGEG\nA1UdHwRaMFgwVqBUoFKGUGh0dHBzOi8vRFdTLkNvbG9yYWRvLkdvdi9Nb2JpbGUv\nUmV2b2NhdGlvbnMvNGQyZjFhZDQ2ODA3NDJkMTk2Njk2MmFkOGUzMjAxYWYuY3Js\nMBAGCSsGAQQBg8UhAQQDUkRTMAoGCCqGSM49BAMCA0kAMEYCIQD1pIzuOHob/oxO\nCzq3tywAbfROldmjAgj0J0r2s/WUGgIhALDx9lxbW62VEksSGKCszl/tviLxZApQ\nIBIOwwJGa0Lv\n-----END CERTIFICATE-----\n"},{"state":"GA","subject_cn":"Georgia Root Certificate Authority","pem":"-----BEGIN CERTIFICATE-----\nMIIDRzCCAu2gAwIBAgITVgO3G2afw4UBNWRnxbpYWrG5uTAKBggqhkjOPQQDAjCB\nnTEOMAwGA1UECBMFVVMtR0ExCzAJBgNVBAYTAlVTMRAwDgYDVQQHEwdDb255ZXJz\nMS4wLAYDVQQKEyVHZW9yZ2lhIERlcGFydG1lbnQgb2YgRHJpdmVyIFNlcnZpY2Vz\nMQ8wDQYDVQQLEwZEUklWRVMxKzApBgNVBAMTIkdlb3JnaWEgUm9vdCBDZXJ0aWZp\nY2F0ZSBBdXRob3JpdHkwHhcNMjQwMzIwMDQwMDAwWhcNMjkwMzIwMDQwMDAwWjCB\nnTEOMAwGA1UECBMFVVMtR0ExCzAJBgNVBAYTAlVTMRAwDgYDVQQHEwdDb255ZXJz\nMS4wLAYDVQQKEyVHZW9yZ2lhIERlcGFydG1lbnQgb2YgRHJpdmVyIFNlcnZpY2Vz\nMQ8wDQYDVQQLEwZEUklWRVMxKzApBgNVBAMTIkdlb3JnaWEgUm9vdCBDZXJ0aWZp\nY2F0ZSBBdXRob3JpdHkwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAASsRp10nCFK\ntW6sJL0xMPMKDCkeKFccLdRGKl2gN9tnzGi9aEee3z9S+vOH2EKTxFVmiqEmCS1u\n5LXCKkLIq+D+o4IBCDCCAQQwDgYDVR0PAQH/BAQDAgEGMBIGA1UdEwEB/wQIMAYB\nAf8CAQAwHQYDVR0OBBYEFK/NJTZCADkKrAM2Djwlii+UBPk1MEgGA1UdEgRBMD+B\nI2dyb3VwaXRwcm9kdWN0aW9uc3VwcG9ydEBkZHMuZ2EuZ292hhhodHRwczovL2Rk\ncy5nZW9yZ2lhLmdvdi8wYwYDVR0fBFwwWjBYoFagVIZSaHR0cHM6Ly93cy5kcml2\nZXMuZ2EuZ292L1dlYlNlcnZpY2VzL05BL0dTUC9jZXJ0aWZpY2F0ZS9yZXZvY2F0\naW9uL3Jldm9jYXRpb25zLmNybDAQBgkrBgEEAYPFIQEEA0dTUDAKBggqhkjOPQQD\nAgNIADBFAiBsNDY02UQq8xatSFHgcdQY64lL0EaaYKsDQ3AvZGjPgAIhAJtOn2wk\num9vlccuEFL8XIgL6XHl2jEQSNKadqLoOk+T\n-----END CERTIFICATE-----\n"},{"state":"HI","subject_cn":"HI_IACA_Prod","pem":"-----BEGIN CERTIFICATE-----\nMIIC3DCCAoKgAwIBAgIQO0MRI6jbr3YzWm0a/hWz7zAKBggqhkjOPQQDAjCBiDEL\nMAkGA1UEBhMCVVMxJTAjBgNVBAoMHERlcGFydG1lbnQgb2YgVHJhbnNwb3J0YXRp\nb24xGDAWBgNVBAsMD1N0YXRlIG9mIEhhd2FpaTEOMAwGA1UECAwFVVMtSEkxFTAT\nBgNVBAMMDEhJX0lBQ0FfUHJvZDERMA8GA1UEBwwISG9ub2x1bHUwHhcNMjQwNjA1\nMjEzNzI0WhcNMzQwNjAzMjIzNzI0WjCBiDELMAkGA1UEBhMCVVMxJTAjBgNVBAoM\nHERlcGFydG1lbnQgb2YgVHJhbnNwb3J0YXRpb24xGDAWBgNVBAsMD1N0YXRlIG9m\nIEhhd2FpaTEOMAwGA1UECAwFVVMtSEkxFTATBgNVBAMMDEhJX0lBQ0FfUHJvZDER\nMA8GA1UEBwwISG9ub2x1bHUwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAARCcrrc\n8mVy8VHxjpV8ZfO8alQwpFRCT8kazy5f/iPEQPSsqc0pj6LdbLQdqXEaokUDKwcx\nfpdN0uaDk5MGWTFZo4HLMIHIMBIGA1UdEwEB/wQIMAYBAf8CAQAwHQYDVR0OBBYE\nFMCDFIyYQWlWmM2VtWMzENDagXvNMA4GA1UdDwEB/wQEAwIBBjAfBgNVHRIEGDAW\nhhRodHRwczovL21kbC5obmwuaW5mbzBiBgNVHR8EWzBZMFegVaBThlFodHRwOi8v\nZDE3NWdjZzB6YzI4dGkuY2xvdWRmcm9udC5uZXQvY3JsLzlkNTE3MmZmLWZhMDYt\nNDJiMy04Zjc0LTI2OTM4ZjdkYWI0Yy5jcmwwCgYIKoZIzj0EAwIDSAAwRQIhAOrQ\ne8YV+0FSVI8EoNZeQklQvzql0UfTs2/+VxB4DnJdAiAuhccsfdM5gsysRhtdTuSL\n+G1QKJa/XMMZxJFWh/ozjg==\n-----END CERTIFICATE-----\n"},{"state":"IL","subject_cn":"Prod IACA Root","pem":"-----BEGIN CERTIFICATE-----\nMIIDETCCArigAwIBAgITALbJtbNSF44XF4jwh5Hu4WVzbzAKBggqhkjOPQQDAjB/\nMQswCQYDVQQGEwJVUzEOMAwGA1UECAwFVVMtSUwxFDASBgNVBAcMC1NwcmluZ2Zp\nZWxkMSQwIgYDVQQKDBtJbGxpbm9pcyBTZWNyZXRhcnkgb2YgU3RhdGUxCzAJBgNV\nBAsMAklUMRcwFQYDVQQDDA5Qcm9kIElBQ0EgUm9vdDAeFw0yNTA5MTgxOTQ2NDZa\nFw00NDA5MTgxOTQ2NDZaMH8xCzAJBgNVBAYTAlVTMQ4wDAYDVQQIDAVVUy1JTDEU\nMBIGA1UEBwwLU3ByaW5nZmllbGQxJDAiBgNVBAoMG0lsbGlub2lzIFNlY3JldGFy\neSBvZiBTdGF0ZTELMAkGA1UECwwCSVQxFzAVBgNVBAMMDlByb2QgSUFDQSBSb290\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEAxgmbxoF1QKsStQfKR5rZp+d3Es2\nBcuslyGNaDDg+MGyM43A25E6V+faSmgz5vxu8P13k8tAX6cmV2YuXOge/aOCAREw\nggENMB0GA1UdDgQWBBT187yTvijqjLqSso9N3EA0fPoc5DAOBgNVHQ8BAf8EBAMC\nAQYwJgYDVR0lBB8wHQYIKwYBBQUHAwIGCCsGAQUFBwMBBgcogYxdBQECMBgGA1Ud\nEQQRMA+BDXBraUBpbHNvcy5nb3YwGAYDVR0SBBEwD4ENcGtpQGlsc29zLmdvdjBs\nBgNVHR8EZTBjMGGgX6BdhltodHRwOi8vY3JsLmlsc29zLm5ldC9kb2l0a2Nzc2Fw\nY3VzY3JsL2Y2Mjk3YTdmLTE3NDUtNDYzYy05ODM1LTUzMDFiY2M0MGNiMC9Qcm9k\nSUFDQVJvb3QuY3JsMBIGA1UdEwEB/wQIMAYBAf8CAQAwCgYIKoZIzj0EAwIDRwAw\nRAIgVCQ2uqxVJQeXADbA575VMJyhgSrav40QlOQ8vux7aO4CICLWYhj6gPS0XNJp\nLhg4rb35oNHkDj9v25TU31FtwPl6\n-----END CERTIFICATE-----\n"},{"state":"MD","subject_cn":"Fast Enterprises Root","pem":"-----BEGIN CERTIFICATE-----\nMIICxjCCAmygAwIBAgITJkV7El8K11IXqY7mz96n/EhiITAKBggqhkjOPQQDAjBq\nMQ4wDAYDVQQIEwVVUy1NRDELMAkGA1UEBhMCVVMxFDASBgNVBAcTC0dsZW4gQnVy\nbmllMRUwEwYDVQQKEwxNYXJ5bGFuZCBNVkExHjAcBgNVBAMTFUZhc3QgRW50ZXJw\ncmlzZXMgUm9vdDAeFw0yNDAxMDUwNTAwMDBaFw0yOTAxMDQwNTAwMDBaMGoxDjAM\nBgNVBAgTBVVTLU1EMQswCQYDVQQGEwJVUzEUMBIGA1UEBxMLR2xlbiBCdXJuaWUx\nFTATBgNVBAoTDE1hcnlsYW5kIE1WQTEeMBwGA1UEAxMVRmFzdCBFbnRlcnByaXNl\ncyBSb290MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEaWcKIqlAWboV93RAa5ad\n0LJBn8W0/yYwtOyUlxuTxoo4SPkorKmOz3EhThC+U4WRrt13aSnCsJtK+waBFghX\nu6OB8DCB7TAOBgNVHQ8BAf8EBAMCAQYwEgYDVR0TAQH/BAgwBgEB/wIBADAdBgNV\nHQ4EFgQUTprRzaFBJ1SLjJsO01tlLCQ4YF0wPAYDVR0SBDUwM4EWbXZhY3NAbWRv\ndC5zdGF0ZS5tZC51c4YZaHR0cHM6Ly9tdmEubWFyeWxhbmQuZ292LzBYBgNVHR8E\nUTBPME2gS6BJhkdodHRwczovL215bXZhLm1hcnlsYW5kLmdvdjo1NDQzL01EUC9X\nZWJTZXJ2aWNlcy9DUkwvbURML3Jldm9jYXRpb25zLmNybDAQBgkrBgEEAYPFIQEE\nA01EUDAKBggqhkjOPQQDAgNIADBFAiEAnX3+E4E5dQ+5G1rmStJTW79ZAiDTabyL\n8lJuYL/nDxMCIHHkAyIJcQlQmKDUVkBr3heUd5N9Y8GWdbWnbHuwe7Om\n-----END CERTIFICATE-----\n"},{"state":"MD","subject_cn":"MDOT MVA mDL Root","pem":"-----BEGIN CERTIFICATE-----\nMIIC7jCCApWgAwIBAgIUAIlZVGm+MFztWeqnzmHC1Liq1DAwCgYIKoZIzj0EAwIw\nZjEOMAwGA1UECBMFVVMtTUQxCzAJBgNVBAYTAlVTMRQwEgYDVQQHEwtHbGVuIEJ1\ncm5pZTEVMBMGA1UEChMMTWFyeWxhbmQgTVZBMRowGAYDVQQDExFNRE9UIE1WQSBt\nREwgUm9vdDAeFw0yNTA2MTgwNjAwMDBaFw0zMDA2MTgwNjAwMDBaMGYxDjAMBgNV\nBAgTBVVTLU1EMQswCQYDVQQGEwJVUzEUMBIGA1UEBxMLR2xlbiBCdXJuaWUxFTAT\nBgNVBAoTDE1hcnlsYW5kIE1WQTEaMBgGA1UEAxMRTURPVCBNVkEgbURMIFJvb3Qw\nWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATSFdDeo2zV3GjlWdICLEyVygkyiM35\n79U/WAtsibXSWXpXeAkENed6fs8a4lPCm3ScBa/GHQsc/xPWG5brrf/vo4IBHzCC\nARswDgYDVR0PAQH/BAQDAgEGMBIGA1UdEwEB/wQIMAYBAf8CAQAwHQYDVR0OBBYE\nFLSwEXEzIOHS6lueN/d0ga94nZ3dMFUGA1UdEgROMEyBHG12YXByaXZhY3lAbWRv\ndC5tYXJ5bGFuZC5nb3aGLGh0dHBzOi8vbXltdmEubWFyeWxhbmQuZ292L2dvL3dl\nYi9Db250YWN0TVZBMG0GA1UdHwRmMGQwYqBgoF6GXGh0dHBzOi8vbXltdmEubWFy\neWxhbmQuZ292OjU0NDMvTURQL1dlYlNlcnZpY2VzL0NSTC9tREwvNmVlMDdkMjE0\nMGYwNDJhMGE2ZTk5YTc4ZTQwNzlhYzAuY3JsMBAGCSsGAQQBg8UhAQQDTURQMAoG\nCCqGSM49BAMCA0cAMEQCIEOzO/2dCcx5yn8Hx6AdqCqgTNps18RrB0QGoHrwkFnx\nAiBApe5NXVdvg2yEhQylijYaUKTpJKNTiOx0CRPusfR5SQ==\n-----END CERTIFICATE-----\n"},{"state":"MT","subject_cn":"carswsnp.dojmt.gov","pem":"-----BEGIN CERTIFICATE-----\nMIIDTzCCAvagAwIBAgIUALz9VunJbM8WsRyc10+waZ7TncgwCgYIKoZIzj0EAwIw\ngZwxDjAMBgNVBAgTBVVTLU1UMQswCQYDVQQGEwJVUzEPMA0GA1UEBxMGSGVsZW5h\nMSYwJAYDVQQKEx1Nb250YW5hIERlcGFydG1lbnQgb2YgSnVzdGljZTEnMCUGA1UE\nCxMeTW9udGFuYSBNb3RvciBWZWhpY2xlIERpdmlzaW9uMRswGQYDVQQDExJjYXJz\nd3NucC5kb2ptdC5nb3YwHhcNMjUwNTAyMDYwMDAwWhcNMzAwNTAyMDYwMDAwWjCB\nnDEOMAwGA1UECBMFVVMtTVQxCzAJBgNVBAYTAlVTMQ8wDQYDVQQHEwZIZWxlbmEx\nJjAkBgNVBAoTHU1vbnRhbmEgRGVwYXJ0bWVudCBvZiBKdXN0aWNlMScwJQYDVQQL\nEx5Nb250YW5hIE1vdG9yIFZlaGljbGUgRGl2aXNpb24xGzAZBgNVBAMTEmNhcnN3\nc25wLmRvam10LmdvdjBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABBdxLVV8czFF\nucq2cRy7ZLkvMScwfq4SgtTu2vhilCFy8BsjSt1QbefFoV+KpPqpCZJLQSWrhSop\ncS7GkDAgYe6jggESMIIBDjAOBgNVHQ8BAf8EBAMCAQYwEgYDVR0TAQH/BAgwBgEB\n/wIBADAdBgNVHQ4EFgQUI0+hpnnb+Y53pVjpRENxe7Xvdc8wOQYDVR0SBDIwMIEa\nY2Fyc2ludGVyZmFjZXRpY2tldEBtdC5nb3aGEmh0dHBzOi8vbXZkbXQuZ292LzB8\nBgNVHR8EdTBzMHGgb6BthmtodHRwczovL2NhcnMuZG9qbXQuZ292L2d3cHViL01v\nYmlsZUNyZWRlbnRpYWwvQ2VydGlmaWNhdGVzL1Jldm9jYXRpb25zLzMyNTk2ZGQy\nZDIwZjQ4M2M5NzRhMzhjYTEwN2Q1NDNlLmNybDAQBgkrBgEEAYPFIQEEA01KUDAK\nBggqhkjOPQQDAgNHADBEAiBzw8qDQXADtdQz8KZopvLZZ15G9CD64accLrUYYehk\nXAIgQiCPWmy2wdDP22dNUnbFRqblP+1K2TYlEV2A789ZOBI=\n-----END CERTIFICATE-----\n"},{"state":"ND","subject_cn":"https://partner.mdl.dot.nd.gov/","pem":"-----BEGIN CERTIFICATE-----\nMIIDQjCCAuegAwIBAgIUALj0FeW5Es6+r08rWsHsIA1igMAwCgYIKoZIzj0EAwIw\ngZ8xDjAMBgNVBAgTBVVTLU5EMQswCQYDVQQGEwJVUzERMA8GA1UEBxMIQmlzbWFy\nY2sxMjAwBgNVBAoTKU5vcnRoIERha290YSBEZXBhcnRtZW50IG9mIFRyYW5zcG9y\ndGF0aW9uMQ8wDQYDVQQLEwZMRUdFTkQxKDAmBgNVBAMTH2h0dHBzOi8vcGFydG5l\nci5tZGwuZG90Lm5kLmdvdi8wHhcNMjUwNjEwMDYwMDAwWhcNMzAwNjEwMDYwMDAw\nWjCBnzEOMAwGA1UECBMFVVMtTkQxCzAJBgNVBAYTAlVTMREwDwYDVQQHEwhCaXNt\nYXJjazEyMDAGA1UEChMpTm9ydGggRGFrb3RhIERlcGFydG1lbnQgb2YgVHJhbnNw\nb3J0YXRpb24xDzANBgNVBAsTBkxFR0VORDEoMCYGA1UEAxMfaHR0cHM6Ly9wYXJ0\nbmVyLm1kbC5kb3QubmQuZ292LzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABH7E\ntk/9zy7wqAwn8Qb1vzhMsx7H7JOYuTUbirPu26Q766Bndw8yyjZTRJp3pZeWWs4T\nbS668mcI1IUB+0e3gnqjgf4wgfswDgYDVR0PAQH/BAQDAgEGMBIGA1UdEwEB/wQI\nMAYBAf8CAQAwHQYDVR0OBBYEFGgohKo4OSffuHWBD5zP+1RjMCEGMDAGA1UdEgQp\nMCeBEGRvdG12dGVjaEBuZC5nb3aGE2h0dHBzOi8vZG90Lm5kLmdvdi8wcgYDVR0f\nBGswaTBnoGWgY4ZhaHR0cHM6Ly9kb3QubmQuZ292L0xFR0VOREVYVC9ETVAvRFNW\nUy9XZWJTZXJ2aWNlcy9tZGwvdjEvY3JsLzQ5ZDNmOTliMGQwNDQyMDY4ZDVlNzY0\nNWM0Njc5ZTk4LmNybDAQBgkrBgEEAYPFIQEEA0RNUDAKBggqhkjOPQQDAgNJADBG\nAiEA8ieW8neYho+hsu4hB2c9rekEh1+GopZ7r8Sz4JU1ctECIQDUGD/4QFHseFdQ\nb/lLDjD6/xUfLfvrPD5my+wMSy8AIA==\n-----END CERTIFICATE-----\n"},{"state":"PR","subject_cn":"PRDTOP-MDL-PROD-CA","pem":"-----BEGIN CERTIFICATE-----\nMIIDIDCCAsagAwIBAgIQG9W2OpTXyQJ0PrtCwfrFKDAKBggqhkjOPQQDAjCBiDEL\nMAkGA1UEBhMCVVMxOTA3BgNVBAoMMFBSIERlcGFydG1lbnQgb2YgVHJhbnNwb3J0\nYXRpb24gYW5kIFB1YmxpYyBXb3JrczEOMAwGA1UECAwFVVMtUFIxGzAZBgNVBAMM\nElBSRFRPUC1NREwtUFJPRC1DQTERMA8GA1UEBwwIU2FuIEp1YW4wHhcNMjQwNjAz\nMjAxMTM4WhcNMjkwNjAzMjExMTM4WjCBiDELMAkGA1UEBhMCVVMxOTA3BgNVBAoM\nMFBSIERlcGFydG1lbnQgb2YgVHJhbnNwb3J0YXRpb24gYW5kIFB1YmxpYyBXb3Jr\nczEOMAwGA1UECAwFVVMtUFIxGzAZBgNVBAMMElBSRFRPUC1NREwtUFJPRC1DQTER\nMA8GA1UEBwwIU2FuIEp1YW4wWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATP6mVx\n4VpNQqr4b4bKe/D7EZqaUouYe2vyca/g/GblDp4HaR2TbEFxYBolDNfBFmCum1Dc\n2a58A/ZAppPJcu/7o4IBDjCCAQowEgYDVR0TAQH/BAgwBgEB/wIBADAdBgNVHQ4E\nFgQUGjv4xc68io+nxd+htquQiI5OM9wwDwYDVR0PAQH/BAUDAwcGADAvBgNVHRIE\nKDAmgQ9tZGxAZHRvcC5wci5nb3aGE2h0dHBzOi8vbWRsLnByLmdvdi8wcgYDVR0f\nBGswaTBnoGWgY4ZhaHR0cDovL21kbC1pYWNhLWNvbHdyLnMzLnVzLWdvdi1lYXN0\nLTEuYW1hem9uYXdzLmNvbS9jcmwvMDI4ZTFkYjAtNjFhZC00Yzg3LTg1OTItYTQ1\nMTQ0ZDU4Mzk4LmNybDAfBgNVHSMEGDAWgBQaO/jFzryKj6fF36G2q5CIjk4z3DAK\nBggqhkjOPQQDAgNIADBFAiEA3zWqrvBJJAtiowJaHMGczNu0t2nIxe7FFatBcQW5\nmGkCIGN4OCs8VZTY0/cgc+GWG8xfeW9lXwR68Sef9L5XYEva\n-----END CERTIFICATE-----\n"},{"state":"UT","subject_cn":"IACA-UTAH-USA","pem":"-----BEGIN CERTIFICATE-----\nMIICeDCCAh+gAwIBAgIQWluwShGaNXltKtR32ToazDAKBggqhkjOPQQDAjBIMRYw\nFAYDVQQDDA1JQUNBLVVUQUgtVVNBMREwDwYDVQQKDAhVdGFoIERMRDEOMAwGA1UE\nCAwFVVMtVVQxCzAJBgNVBAYTAlVTMB4XDTIzMTIxODEyMjU0N1oXDTMyMTIxNTEy\nMjU0NlowSDEWMBQGA1UEAwwNSUFDQS1VVEFILVVTQTERMA8GA1UECgwIVXRhaCBE\nTEQxDjAMBgNVBAgMBVVTLVVUMQswCQYDVQQGEwJVUzBZMBMGByqGSM49AgEGCCqG\nSM49AwEHA0IABGHwBQyjlOERffLUFurAF9F0gyRuD34FkPK8RfVuySJrooUnBi86\njfKAEIFGzhAiR48EUe6YK2YcqfUqrEOX3uajgeowgecwEgYDVR0TAQH/BAgwBgEB\n/wIBADAfBgNVHSMEGDAWgBQ8TGzf54I0LuEU5s6tEgo5/Qg0azAnBgNVHRIEIDAe\nhhxodHRwczovL21vYmlsZWRsLnVzL2lhY2EtdXQvMBEGA1UdIAQKMAgwBgYEVR0g\nADBFBgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vd3d3Lm1vYmlsZWRsLnVzL3V0LWlh\nY2EvbWRsRFMtVVRBSC1VU0EwMDIuY3JsMB0GA1UdDgQWBBQ8TGzf54I0LuEU5s6t\nEgo5/Qg0azAOBgNVHQ8BAf8EBAMCAQYwCgYIKoZIzj0EAwIDRwAwRAIgdzrANru5\nrEm8T4qsYoPEo5YqJ6wyZstAfMfkp9/BtjcCIEez933eeyubFUfqjd3hXIoRcl1E\n0UTdnk/UOBLQCG10\n-----END CERTIFICATE-----\n"},{"state":"UT","subject_cn":"IACA-UTAH-USA","pem":"-----BEGIN CERTIFICATE-----\nMIICejCCAh+gAwIBAgIQP1fWX6bK5IWafQpOzL3JyjAKBggqhkjOPQQDAjBIMRYw\nFAYDVQQDDA1JQUNBLVVUQUgtVVNBMREwDwYDVQQKDAhVdGFoIERMRDEOMAwGA1UE\nCAwFVVMtVVQxCzAJBgNVBAYTAlVTMB4XDTI1MDMxMTEyNDkyNVoXDTM0MDYwNzEy\nNDkyNFowSDEWMBQGA1UEAwwNSUFDQS1VVEFILVVTQTERMA8GA1UECgwIVXRhaCBE\nTEQxDjAMBgNVBAgMBVVTLVVUMQswCQYDVQQGEwJVUzBZMBMGByqGSM49AgEGCCqG\nSM49AwEHA0IABA9gsjBB4V6FtUGvCF/ZuQu65dfWIK87Yr1r4KzBM6LFvwxTB5Mo\nWuS/JjyTZO3fENEFm3TtG+Js7KxIZMDClKyjgeowgecwEgYDVR0TAQH/BAgwBgEB\n/wIBADAfBgNVHSMEGDAWgBR9Bklm+FL6KtqQNeKXdsOkEUNg3TAnBgNVHRIEIDAe\nhhxodHRwczovL21vYmlsZWRsLnVzL2lhY2EtdXQvMBEGA1UdIAQKMAgwBgYEVR0g\nADBFBgNVHR8EPjA8MDqgOKA2hjRodHRwOi8vd3d3Lm1vYmlsZWRsLnVzL3V0LWlh\nY2EvbWRsRFMtVVRBSC1VU0EwMDMuY3JsMB0GA1UdDgQWBBR9Bklm+FL6KtqQNeKX\ndsOkEUNg3TAOBgNVHQ8BAf8EBAMCAQYwCgYIKoZIzj0EAwIDSQAwRgIhAP2roq3h\nwjl7IQ9j52KMANKn9L9ornH31k42AAUjYALYAiEAhla2itEIdVuVipPO2JorLhEg\nkF1FzMIw0ggETTzLmGo=\n-----END CERTIFICATE-----\n"},{"state":"VA","subject_cn":"VA mID IACA","pem":"-----BEGIN CERTIFICATE-----\nMIICEDCCAbWgAwIBAgIUUhxrFDJvWXsEq8cE9Ubc56J3UHgwCgYIKoZIzj0EAwIw\nMzEUMBIGA1UEAwwLVkEgbUlEIElBQ0ExDjAMBgNVBAgMBVVTLVZBMQswCQYDVQQG\nEwJVUzAeFw0yNDAxMTExODIwNTVaFw0yNjAxMTAxODIwNTVaMDMxFDASBgNVBAMM\nC1ZBIG1JRCBJQUNBMQ4wDAYDVQQIDAVVUy1WQTELMAkGA1UEBhMCVVMwWTATBgcq\nhkjOPQIBBggqhkjOPQMBBwNCAARYlUGHKrbF8sp6Px+uEUIaolNpS1zsnzvUhQzF\n6dZMxyc5u0q8q+1JBLm4IfVgxz/z0mwylqJHvdqFx3HI2qS/o4GmMIGjMB0GA1Ud\nDgQWBBQtBA32uf4Tf6oSkyUT9gwRXhvexTAOBgNVHQ8BAf8EBAMCAQYwIwYDVR0S\nBBwwGoYYaHR0cHM6Ly9kbXYudmlyZ2luaWEuZ292MBIGA1UdEwEB/wQIMAYBAf8C\nAQAwOQYDVR0fBDIwMDAuoCygKoYoaHR0cHM6Ly93d3cubW9iaWxlZGwubmV0L21v\nYmlsZUlEL1ZBLmNybDAKBggqhkjOPQQDAgNJADBGAiEA8BTTtb6qI0PwJo1QLauM\n4IF5wUod/uBWzAUZfxzP2f4CIQCXw1m3h61zd73x+14QF2hHlfwbSy1G5kXMq/VY\nEdBdOQ==\n-----END CERTIFICATE-----\n"},{"state":"VA","subject_cn":"VA mID IACA-A","pem":"-----BEGIN CERTIFICATE-----\nMIICWDCCAf+gAwIBAgIUSDXJYXPM1GzzndPu7U7uQQpoOU4wCgYIKoZIzj0EAwIw\nNTEWMBQGA1UEAwwNVkEgbUlEIElBQ0EtQTEOMAwGA1UECAwFVVMtVkExCzAJBgNV\nBAYTAlVTMB4XDTI1MDcyMjEzMjYwMloXDTI3MDcyMjEzMjYwMVowNTEWMBQGA1UE\nAwwNVkEgbUlEIElBQ0EtQTEOMAwGA1UECAwFVVMtVkExCzAJBgNVBAYTAlVTMFkw\nEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEZ96O6yAnVSQogBLxplgoWuEQbJGeNwki\nC1Hx2MEKM6Jnpq4Wls+GU9IWImlUWWTaY0fgf+51Wkq1dguB8cVme6OB7DCB6TAS\nBgNVHRMBAf8ECDAGAQH/AgEAMB8GA1UdIwQYMBaAFJYUvOtd2fu7Ag6feF/TB+YJ\n9+FNMCMGA1UdEgQcMBqGGGh0dHBzOi8vZG12LnZpcmdpbmlhLmdvdjAjBgNVHREE\nHDAahhhodHRwczovL2Rtdi52aXJnaW5pYS5nb3YwOQYDVR0fBDIwMDAuoCygKoYo\naHR0cHM6Ly93d3cubW9iaWxlZGwubmV0L21vYmlsZUlEL1ZBLmNybDAdBgNVHQ4E\nFgQUlhS8613Z+7sCDp94X9MH5gn34U0wDgYDVR0PAQH/BAQDAgEGMAoGCCqGSM49\nBAMCA0cAMEQCIAZyBOjZrupvH9PqbgZNZFtgwVs+fXZVqgJKckP6FAbrAiAQdjxr\n6xA4VRVp/yjS9CKGoMw7tPkUrcfofZTv2AvPCA==\n-----END CERTIFICATE-----\n"}]};</script>
+
+<script>
+// ── Configuration ───────────────────────────────────────────────────────
+const DATA_URL = 'data/dashboard_data.json';
+const MAP_URL = 'assets/data/states-10m.json';
+
+const FIPS_TO_ABBR = {"01":"AL","02":"AK","04":"AZ","05":"AR","06":"CA","08":"CO","09":"CT","10":"DE","11":"DC","12":"FL","13":"GA","15":"HI","16":"ID","17":"IL","18":"IN","19":"IA","20":"KS","21":"KY","22":"LA","23":"ME","24":"MD","25":"MA","26":"MI","27":"MN","28":"MS","29":"MO","30":"MT","31":"NE","32":"NV","33":"NH","34":"NJ","35":"NM","36":"NY","37":"NC","38":"ND","39":"OH","40":"OK","41":"OR","42":"PA","44":"RI","45":"SC","46":"SD","47":"TN","48":"TX","49":"UT","50":"VT","51":"VA","53":"WA","54":"WV","55":"WI","56":"WY","72":"PR"};
+const ABBR_TO_STATE = {"AL":"Alabama","AK":"Alaska","AZ":"Arizona","AR":"Arkansas","CA":"California","CO":"Colorado","CT":"Connecticut","DE":"Delaware","DC":"District of Columbia","FL":"Florida","GA":"Georgia","HI":"Hawaii","ID":"Idaho","IL":"Illinois","IN":"Indiana","IA":"Iowa","KS":"Kansas","KY":"Kentucky","LA":"Louisiana","ME":"Maine","MD":"Maryland","MA":"Massachusetts","MI":"Michigan","MN":"Minnesota","MS":"Mississippi","MO":"Missouri","MT":"Montana","NE":"Nebraska","NV":"Nevada","NH":"New Hampshire","NJ":"New Jersey","NM":"New Mexico","NY":"New York","NC":"North Carolina","ND":"North Dakota","OH":"Ohio","OK":"Oklahoma","OR":"Oregon","PA":"Pennsylvania","RI":"Rhode Island","SC":"South Carolina","SD":"South Dakota","TN":"Tennessee","TX":"Texas","UT":"Utah","VT":"Vermont","VA":"Virginia","WA":"Washington","WV":"West Virginia","WI":"Wisconsin","WY":"Wyoming","PR":"Puerto Rico"};
+const STATE_TO_ABBR = Object.fromEntries(Object.entries(ABBR_TO_STATE).map(([k,v]) => [v,k]));
+
+let DATA = null;
+let searchTerm = '';
+
+// ── Utilities ───────────────────────────────────────────────────────────
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function fmtDate(iso) { return iso ? new Date(iso).toLocaleDateString('en-US', {year:'numeric',month:'short',day:'numeric'}) : '–'; }
+function certStatus(nb, na) {
+    const now = new Date();
+    const before = new Date(nb), after = new Date(na);
+    if (now < before) return { text: 'Not Yet Valid', cls: '' };
+    if (now > after) return { text: 'Expired', cls: 'status-expired' };
+    return { text: 'Valid', cls: 'status-valid' };
+}
+
+// ── Tooltip ─────────────────────────────────────────────────────────────
+const tip = document.getElementById('tooltip');
+function showTip(evt, html) {
+    tip.innerHTML = html;
+    tip.classList.add('visible');
+    tip.style.left = (evt.clientX + 12) + 'px';
+    tip.style.top = (evt.clientY - 10) + 'px';
+}
+function hideTip() { tip.classList.remove('visible'); }
+
+// ── Rendering ───────────────────────────────────────────────────────────
+async function renderApp() {
+    const app = document.getElementById('app');
+    app.innerHTML = '';
+
+    renderStats(app);
+    renderSources(app);
+    try { await renderMap(app); } catch(e) { console.warn('Map render failed:', e); }
+    try { renderCharts(app); } catch(e) { console.warn('Chart render failed:', e); }
+    renderAuthorities(app);
+    renderFooter(app);
+}
+
+function renderStats(container) {
+    const s = DATA.stats;
+    const cards = [
+        { label: 'TSA Recognized', value: s.tsa_recognized, note: 'Participating states' },
+        { label: 'VICAL Roots', value: s.vical_authorities, note: 'States in AAMVA VICAL' },
+        { label: 'Web Discovered', value: s.web_discovered, note: 'Roots from state sites' },
+        { label: 'Total Roots', value: s.total_roots, note: 'Across all sources' },
+        { label: 'Root Coverage', value: s.root_coverage_pct + '%', note: 'mDL programs w/ root' },
+        { label: 'Pop. Coverage', value: s.population_coverage_pct + '%', note: 'US population eligible' },
+    ];
+    const row = document.createElement('div');
+    row.className = 'stats-row';
+    row.innerHTML = cards.map(c => `
+        <div class="stat-card">
+            <div class="stat-label">${c.label}</div>
+            <div class="stat-value">${c.value}</div>
+            <div class="stat-note">${c.note}</div>
+        </div>
+    `).join('');
+    container.appendChild(row);
+}
+
+function renderSources(container) {
+    const vm = DATA.vical_meta || {};
+    const row = document.createElement('div');
+    row.className = 'sources-row';
+    row.innerHTML = `
+        <div class="source-card">
+            <h3>📋 AAMVA VICAL</h3>
+            <dl class="source-detail">
+                <dt>Provider</dt><dd>${esc(vm.vical_provider || '–')}</dd>
+                <dt>Published</dt><dd>${fmtDate(vm.date)}</dd>
+                <dt>Next Update</dt><dd>${fmtDate(vm.next_update)}</dd>
+                <dt>Issue ID</dt><dd>${vm.vical_issue_id || '–'}</dd>
+            </dl>
+        </div>
+        <div class="source-card">
+            <h3>✈️ TSA Participating States</h3>
+            <dl class="source-detail">
+                <dt>Source</dt><dd>tsa.gov</dd>
+                <dt>States</dt><dd>${DATA.stats.tsa_recognized}</dd>
+            </dl>
+        </div>
+        <div class="source-card">
+            <h3>🌐 Web Discovered</h3>
+            <dl class="source-detail">
+                <dt>Source</dt><dd>State DMV / DOT sites</dd>
+                <dt>Roots Found</dt><dd>${DATA.stats.web_discovered} states</dd>
+            </dl>
+        </div>
+    `;
+    container.appendChild(row);
+}
+
+// ── Map ─────────────────────────────────────────────────────────────────
+async function renderMap(container) {
+    if (typeof d3 === 'undefined' || typeof topojson === 'undefined') {
+        console.warn('D3 or topojson not available, skipping map');
+        return;
+    }
+    const panel = document.createElement('div');
+    panel.className = 'panel';
+    panel.innerHTML = `
+        <div class="panel-head">
+            <div class="panel-title">🗺️ mDL Coverage Map</div>
+            <div class="map-legend">
+                <div class="legend-item"><div class="legend-swatch" style="background:var(--teal)"></div> mDL &amp; Root</div>
+                <div class="legend-item"><div class="legend-swatch" style="background:var(--amber)"></div> mDL (No Root)</div>
+                <div class="legend-item"><div class="legend-swatch" style="background:var(--slate-300)"></div> No Program</div>
+            </div>
+        </div>
+        <div class="map-wrap"><svg id="us-map" viewBox="0 0 975 610"></svg></div>
+    `;
+    container.appendChild(panel);
+
+    try {
+        const atlas = await d3.json(MAP_URL);
+        const states = topojson.feature(atlas, atlas.objects.states);
+
+        const projection = d3.geoAlbersUsa().scale(1000).translate([487.5, 305]);
+        const path = d3.geoPath().projection(projection);
+        const svg = d3.select('#us-map');
+
+        svg.selectAll('path')
+            .data(states.features)
+            .join('path')
+            .attr('d', path)
+            .attr('class', d => {
+                const name = d.properties.name;
+                const abbr = STATE_TO_ABBR[name];
+                const status = abbr ? (DATA.map_states[abbr] || 'none') : 'none';
+                const cls = status === 'mdl_with_root' ? 'state-mdl-root' :
+                            status === 'mdl_no_root' ? 'state-mdl-noroot' : 'state-none';
+                return 'state-path ' + cls;
+            })
+            .on('mouseover', (evt, d) => {
+                const name = d.properties.name;
+                const abbr = STATE_TO_ABBR[name];
+                const status = abbr ? DATA.map_states[abbr] : 'none';
+                const auth = DATA.authorities.find(a => a.name === name);
+                let html = `<strong>${name}</strong>`;
+                if (status === 'mdl_with_root') html += '<br>✅ mDL Program · Root found';
+                else if (status === 'mdl_no_root') html += '<br>⚠️ mDL Program · No discoverable root';
+                else html += '<br>No mDL program';
+                if (auth && auth.roots.length > 0) html += `<br>📜 ${auth.roots.length} root${auth.roots.length>1?'s':''}`;
+                showTip(evt, html);
+            })
+            .on('mousemove', (evt) => {
+                tip.style.left = (evt.clientX + 12) + 'px';
+                tip.style.top = (evt.clientY - 10) + 'px';
+            })
+            .on('mouseout', hideTip);
+
+        svg.append('path')
+            .datum(topojson.mesh(atlas, atlas.objects.nation))
+            .attr('d', path)
+            .attr('fill', 'none')
+            .attr('stroke', '#999')
+            .attr('stroke-width', 0.5);
+    } catch (e) {
+        console.error('Map load failed:', e);
+    }
+}
+
+// ── Charts ──────────────────────────────────────────────────────────────
+function renderCharts(container) {
+    if (typeof d3 === 'undefined') {
+        console.warn('D3 not available, skipping charts');
+        return;
+    }
+    const panel = document.createElement('div');
+    panel.className = 'panel';
+    panel.innerHTML = `
+        <div class="panel-head">
+            <div class="panel-title">📈 Root Certificate Analysis</div>
+            <div class="chart-tabs">
+                <button class="chart-tab active" data-tab="gantt">Root Lifetimes</button>
+                <button class="chart-tab" data-tab="algo">Algorithm Breakdown</button>
+            </div>
+        </div>
+        <div class="panel-body chart-area">
+            <div id="gantt-view" class="chart-view active"><svg id="gantt-chart"></svg></div>
+            <div id="algo-view" class="chart-view"><div id="algo-content"></div></div>
+        </div>
+    `;
+    container.appendChild(panel);
+
+    panel.querySelectorAll('.chart-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            panel.querySelectorAll('.chart-tab').forEach(b => b.classList.remove('active'));
+            panel.querySelectorAll('.chart-view').forEach(v => v.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById(btn.dataset.tab + '-view').classList.add('active');
+        });
+    });
+
+    drawGanttChart();
+    drawAlgoBreakdown();
+}
+
+function drawGanttChart() {
+    const allRoots = DATA.authorities.flatMap(a => a.roots.map(r => ({
+        ...r,
+        stateName: a.name,
+    })));
+    if (allRoots.length === 0) return;
+
+    const svgEl = document.getElementById('gantt-chart');
+    const containerWidth = svgEl.parentElement.clientWidth || 800;
+    const margin = { top: 30, right: 30, bottom: 40, left: 220 };
+    const barHeight = 22;
+    const gap = 4;
+    const height = margin.top + margin.bottom + allRoots.length * (barHeight + gap);
+    const width = containerWidth;
+
+    const svg = d3.select('#gantt-chart')
+        .attr('viewBox', `0 0 ${width} ${height}`)
+        .attr('preserveAspectRatio', 'xMidYMid meet');
+    svg.selectAll('*').remove();
+
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const innerW = width - margin.left - margin.right;
+    const innerH = height - margin.top - margin.bottom;
+
+    const x = d3.scaleTime()
+        .domain([
+            d3.min(allRoots, r => new Date(r.not_before)),
+            d3.max(allRoots, r => new Date(r.not_after))
+        ])
+        .range([0, innerW]);
+
+    const y = d3.scaleBand()
+        .domain(allRoots.map((_, i) => i))
+        .range([0, innerH])
+        .padding(0.15);
+
+    g.append('g')
+        .attr('transform', `translate(0,${innerH})`)
+        .call(d3.axisBottom(x).ticks(8))
+        .selectAll('text').style('font-size', '0.7rem');
+
+    g.append('g')
+        .call(d3.axisLeft(y).tickFormat(i => {
+            const r = allRoots[i];
+            return `${r.stateName} (${r.algorithm} ${r.key_detail})`;
+        }))
+        .selectAll('text').style('font-size', '0.65rem');
+
+    // NIST 2031 line
+    const nist = new Date('2031-01-01');
+    if (x.domain()[0] < nist && x.domain()[1] > nist) {
+        g.append('line')
+            .attr('class', 'nist-line')
+            .attr('x1', x(nist)).attr('x2', x(nist))
+            .attr('y1', -10).attr('y2', innerH);
+        g.append('text')
+            .attr('x', x(nist)).attr('y', -14)
+            .attr('text-anchor', 'middle')
+            .style('font-size', '0.65rem')
+            .style('fill', 'var(--red)')
+            .style('font-weight', '600')
+            .text('NIST Rec. Limit');
+    }
+
+    g.selectAll('.gantt-bar')
+        .data(allRoots)
+        .join('rect')
+        .attr('class', 'gantt-bar')
+        .attr('x', r => x(new Date(r.not_before)))
+        .attr('y', (_, i) => y(i))
+        .attr('width', r => Math.max(2, x(new Date(r.not_after)) - x(new Date(r.not_before))))
+        .attr('height', y.bandwidth())
+        .attr('rx', 3)
+        .style('fill', r => {
+            const weak = (r.algorithm === 'RSA' && r.key_detail === '2048') ||
+                         (r.algorithm === 'ECDSA' && r.key_detail === 'secp256r1');
+            return weak ? 'var(--amber)' : 'var(--teal)';
+        })
+        .on('mouseover', (evt, r) => {
+            const years = ((new Date(r.not_after) - new Date(r.not_before)) / (365.25*86400000)).toFixed(1);
+            showTip(evt, `<strong>${r.stateName}</strong><br>${r.subject_cn}<br>${r.algorithm} ${r.key_detail}<br>${years} year lifetime`);
+        })
+        .on('mousemove', evt => {
+            tip.style.left = (evt.clientX + 12) + 'px';
+            tip.style.top = (evt.clientY - 10) + 'px';
+        })
+        .on('mouseout', hideTip);
+}
+
+function drawAlgoBreakdown() {
+    const allRoots = DATA.authorities.flatMap(a => a.roots);
+    const counts = {};
+    allRoots.forEach(r => {
+        const key = `${r.algorithm} ${r.key_detail}`;
+        counts[key] = (counts[key] || 0) + 1;
+    });
+    const el = document.getElementById('algo-content');
+    const entries = Object.entries(counts).sort((a,b) => b[1] - a[1]);
+    const max = Math.max(...entries.map(e => e[1]));
+    el.innerHTML = `<div style="max-width:500px;">` +
+        entries.map(([name, count]) => {
+            const pct = (count / allRoots.length * 100).toFixed(0);
+            const barW = (count / max * 100).toFixed(1);
+            return `<div style="margin-bottom:0.75rem;">
+                <div style="display:flex;justify-content:space-between;font-size:0.8rem;font-weight:600;margin-bottom:0.2rem;">
+                    <span>${esc(name)}</span><span>${count} (${pct}%)</span>
+                </div>
+                <div style="background:var(--slate-200);border-radius:4px;height:8px;overflow:hidden;">
+                    <div style="width:${barW}%;height:100%;background:var(--teal);border-radius:4px;transition:width 0.5s;"></div>
+                </div>
+            </div>`;
+        }).join('') + `</div>`;
+}
+
+// ── Authority Cards ─────────────────────────────────────────────────────
+function renderAuthorities(container) {
+    const panel = document.createElement('div');
+    panel.className = 'panel';
+
+    const totalRoots = DATA.authorities.reduce((s,a) => s + a.roots.length, 0);
+    panel.innerHTML = `
+        <div class="panel-head">
+            <div class="panel-title">📜 Issuing Authorities</div>
+            <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
+                <input type="text" id="auth-search" placeholder="Search authorities…" style="padding:0.45rem 0.75rem;border:1px solid rgba(255,255,255,0.25);border-radius:6px;background:rgba(255,255,255,0.1);color:white;font-size:0.8rem;font-family:inherit;width:200px;">
+                <button class="download-btn" id="download-pem" ${totalRoots===0?'disabled':''}>⬇ Download ${totalRoots} Roots (PEM)</button>
+            </div>
+        </div>
+        <div id="auth-grid" class="auth-grid"></div>
+    `;
+    container.appendChild(panel);
+
+    renderAuthorityCards();
+
+    document.getElementById('auth-search').addEventListener('input', e => {
+        searchTerm = e.target.value.toLowerCase();
+        renderAuthorityCards();
+    });
+
+    document.getElementById('download-pem').addEventListener('click', downloadPEM);
+}
+
+function renderAuthorityCards() {
+    const grid = document.getElementById('auth-grid');
+    const filtered = DATA.authorities.filter(a =>
+        !searchTerm || a.name.toLowerCase().includes(searchTerm)
+    );
+
+    if (filtered.length === 0) {
+        grid.innerHTML = '<div class="no-roots-msg">No matching authorities.</div>';
+        return;
+    }
+
+    grid.innerHTML = filtered.map(auth => {
+        const hasRoots = auth.roots.length > 0;
+        const sourceBadges = auth.sources.map(s => {
+            const cls = s === 'TSA' ? 'badge-tsa' : s === 'AAMVA' ? 'badge-aamva' : 'badge-web';
+            return `<span class="badge ${cls}">${s}</span>`;
+        }).join('');
+        const walletBadges = (auth.eligible_ids || []).map(id =>
+            `<span class="badge badge-wallet">${esc(id)}</span>`
+        ).join('');
+        const rootsHTML = hasRoots ? auth.roots.map(r => {
+            const st = certStatus(r.not_before, r.not_after);
+            const tags = (r.tags || []).map(t =>
+                `<span class="tag-chip tag-${t}">${t}</span>`
+            ).join('');
+            return `<div class="root-item" onclick="viewCertificate('${r.fingerprint_sha256}')" style="cursor:pointer;">
+                <div class="root-cn" title="${esc(r.subject_full)}">${esc(r.subject_cn)}</div>
+                <div class="root-meta">
+                    <span class="${st.cls}">${st.text}</span>
+                    <code>${fmtDate(r.not_before)} → ${fmtDate(r.not_after)}</code>
+                    <span>${r.algorithm} ${r.key_detail}</span>
+                    ${tags}
+                    <span style="margin-left:auto;color:var(--teal-dark);font-weight:600;">View →</span>
+                </div>
+            </div>`;
+        }).join('') : '<div class="no-roots-msg">No discoverable root CA.</div>';
+
+        return `<div class="auth-card">
+            <div class="auth-card-head ${hasRoots ? 'has-roots' : 'no-roots'}">
+                <div class="auth-name">${esc(auth.name)}</div>
+                <div class="auth-badges">${sourceBadges} ${walletBadges}</div>
+                ${hasRoots ? `<div class="root-count-pip">${auth.roots.length}</div>` : ''}
+            </div>
+            <div class="auth-card-body">${rootsHTML}</div>
+        </div>`;
+    }).join('');
+}
+
+// ── Certificate Viewer (Peculiar web component with pure-data fallback) ──
+let pemLookup = {};
+function buildPemLookup() {
+    pemLookup = {};
+    if (DATA && DATA._pem_bundle) {
+        DATA._pem_bundle.forEach(p => {
+            // Extract base64 from PEM
+            const b64 = p.pem
+                .replace('-----BEGIN CERTIFICATE-----', '')
+                .replace('-----END CERTIFICATE-----', '')
+                .replace(/\s/g, '');
+            DATA.authorities.forEach(auth => {
+                auth.roots.forEach(r => {
+                    if (r.state === p.state && r.subject_cn === p.subject_cn) {
+                        pemLookup[r.fingerprint_sha256] = {
+                            cn: r.subject_cn,
+                            full: r.subject_full,
+                            pem: p.pem,
+                            b64: b64,
+                            root: r
+                        };
+                    }
+                });
+            });
+        });
+    }
+}
+
+function buildInfoCell(label, value, extraClass) {
+    return `<div class="cert-info-cell">
+        <div class="cert-info-label">${esc(label)}</div>
+        <div class="cert-info-value ${extraClass || ''}">${value}</div>
+    </div>`;
+}
+
+function viewCertificate(fingerprint) {
+    const entry = pemLookup[fingerprint];
+    if (!entry) {
+        console.warn('No PEM found for fingerprint:', fingerprint);
+        return;
+    }
+
+    const modal = document.getElementById('cert-modal');
+    const title = document.getElementById('cert-modal-title');
+    const body = document.getElementById('cert-modal-body');
+    const r = entry.root;
+
+    title.textContent = entry.cn;
+    body.innerHTML = '';
+    modal.classList.add('visible');
+
+    // Wait for the Peculiar web component to be registered, then use it.
+    // If it doesn't register within 8s (e.g. script blocked), fall back.
+    const fallbackTimer = setTimeout(() => {
+        if (body.querySelector('peculiar-certificate-viewer')) {
+            body.innerHTML = '';
+        }
+        renderPureDataView(body, entry, r, fingerprint);
+    }, 8000);
+
+    customElements.whenDefined('peculiar-certificate-viewer').then(() => {
+        clearTimeout(fallbackTimer);
+        body.innerHTML = '';
+        const viewer = document.createElement('peculiar-certificate-viewer');
+        viewer.setAttribute('certificate', entry.b64);
+        viewer.setAttribute('download', '');
+        body.appendChild(viewer);
+    }).catch(() => {
+        clearTimeout(fallbackTimer);
+        renderPureDataView(body, entry, r, fingerprint);
+    });
+
+    // Show a loading indicator while we wait
+    body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;min-height:200px;gap:0.75rem;color:var(--slate-500);"><div class="spinner"></div> Loading certificate viewer…</div>';
+}
+
+function renderPureDataView(body, entry, r, fingerprint) {
+    const st = certStatus(r.not_before, r.not_after);
+    const lifetimeYears = ((new Date(r.not_after) - new Date(r.not_before)) / (365.25 * 86400000)).toFixed(1);
+
+    // Subject banner
+    const banner = document.createElement('div');
+    banner.style.cssText = 'margin-bottom:1rem;padding:1rem;background:linear-gradient(135deg,#f0fdfa,#ccfbf1);border-radius:8px;border-left:3px solid var(--teal);';
+    banner.innerHTML = `
+        <div style="font-size:0.8rem;color:var(--slate-500);margin-bottom:0.5rem;">Subject</div>
+        <div style="font-weight:600;font-size:0.9rem;word-break:break-all;">${esc(entry.full)}</div>
+    `;
+    body.appendChild(banner);
+
+    // Info grid
+    const grid = document.createElement('div');
+    grid.className = 'cert-info-grid';
+    grid.innerHTML =
+        buildInfoCell('Status', `<span class="${st.cls}">${st.text}</span>`) +
+        buildInfoCell('Algorithm', `${r.algorithm} ${r.key_detail}`) +
+        buildInfoCell('Not Before', fmtDate(r.not_before)) +
+        buildInfoCell('Not After', fmtDate(r.not_after)) +
+        buildInfoCell('Lifetime', `${lifetimeYears} years`) +
+        buildInfoCell('Source', r.source || 'Unknown');
+    body.appendChild(grid);
+
+    // Tags
+    if (r.tags && r.tags.length > 0) {
+        const tagsDiv = document.createElement('div');
+        tagsDiv.style.cssText = 'margin-bottom:1rem;';
+        tagsDiv.innerHTML = `<div style="font-size:0.75rem;color:var(--slate-500);margin-bottom:0.35rem;">CA Software Tags</div>` +
+            r.tags.map(t => `<span class="tag-chip tag-${t}" style="margin-right:0.35rem;">${t}</span>`).join('');
+        body.appendChild(tagsDiv);
+    }
+
+    // Fingerprint
+    const fpDiv = document.createElement('div');
+    fpDiv.style.cssText = 'margin-bottom:1rem;';
+    fpDiv.innerHTML = `
+        <div style="font-size:0.75rem;color:var(--slate-500);margin-bottom:0.35rem;">SHA-256 Fingerprint</div>
+        <code style="display:block;background:var(--slate-100);padding:0.5rem 0.75rem;border-radius:6px;font-size:0.7rem;word-break:break-all;font-family:'JetBrains Mono',monospace;">${esc(fingerprint)}</code>
+    `;
+    body.appendChild(fpDiv);
+
+    // PEM
+    const pemDiv = document.createElement('div');
+    pemDiv.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">
+            <div style="font-size:0.75rem;color:var(--slate-500);">PEM Certificate</div>
+            <button onclick="navigator.clipboard.writeText(this.closest('div').parentElement.querySelector('pre').textContent).then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy PEM',1500);})" style="background:var(--teal);color:var(--navy);border:none;padding:0.3rem 0.75rem;border-radius:4px;font-size:0.7rem;font-weight:600;cursor:pointer;font-family:inherit;">Copy PEM</button>
+        </div>
+        <pre style="background:var(--navy);color:var(--teal);padding:1rem;border-radius:8px;font-size:0.7rem;overflow-x:auto;white-space:pre-wrap;word-break:break-all;font-family:'JetBrains Mono',monospace;">${esc(entry.pem.trim())}</pre>
+    `;
+    body.appendChild(pemDiv);
+}
+
+function closeCertModal() {
+    document.getElementById('cert-modal').classList.remove('visible');
+    document.getElementById('cert-modal-body').innerHTML = '';
+}
+
+// Close on Escape
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeCertModal(); });
+// Close on backdrop click
+document.getElementById('cert-modal').addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeCertModal();
+});
+
+// ── PEM Download ────────────────────────────────────────────────────────
+function downloadPEM() {
+    if (!DATA._pem_bundle || DATA._pem_bundle.length === 0) return;
+    let bag = '';
+    DATA._pem_bundle.forEach(p => {
+        bag += `# ${p.subject_cn} (${p.state})\n${p.pem}\n`;
+    });
+    const blob = new Blob([bag], { type: 'application/x-pem-file' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'mdl_trust_roots.pem';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function renderFooter(container) {
+    const f = document.createElement('div');
+    f.className = 'footer';
+    f.innerHTML = `
+        <div>Data sourced from <a href="https://www.tsa.gov/digital-id/participating-states" target="_blank">TSA</a>,
+        <a href="https://vical.dts.aamva.org" target="_blank">AAMVA VICAL</a>, and state DMV/DOT sites.</div>
+        <div style="margin-top:0.5rem;">Learn about the WebPKI at the <a href="https://webpki.systematicreasoning.com" target="_blank">WebPKI Observatory</a>.</div>
+    `;
+    container.appendChild(f);
+}
+
+// ── Init ────────────────────────────────────────────────────────────────
+async function init() {
+    try {
+        // Prefer inline data (injected by pipeline), fall back to fetch
+        if (typeof window.DASHBOARD_DATA !== 'undefined') {
+            DATA = window.DASHBOARD_DATA;
+        } else if (typeof DASHBOARD_DATA !== 'undefined') {
+            DATA = DASHBOARD_DATA;
+        } else {
+            const resp = await fetch(DATA_URL);
+            if (!resp.ok) throw new Error(`Could not load data. Run: python pipeline.py`);
+            DATA = await resp.json();
+        }
+
+        document.getElementById('generated-time').textContent =
+            'Data: ' + fmtDate(DATA._generated);
+        document.getElementById('pipeline-version').textContent =
+            DATA._pipeline_version || '–';
+
+        buildPemLookup();
+        await renderApp();
+    } catch (err) {
+        document.getElementById('app').innerHTML = `
+            <div style="text-align:center;padding:4rem 2rem;color:var(--red);">
+                <h2>Failed to load dashboard data</h2>
+                <p style="margin-top:0.5rem;color:var(--slate-500);">${esc(err.message)}</p>
+                <p style="margin-top:1rem;color:var(--slate-500);font-size:0.85rem;">
+                    Run <code style="background:var(--slate-100);padding:0.2rem 0.5rem;border-radius:4px;">python pipeline.py</code> to build a self-contained index.html
+                </p>
+            </div>
+        `;
+        console.error('Init failed:', err);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
