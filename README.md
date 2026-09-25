@@ -8,9 +8,10 @@ Interactive dashboard tracking mobile Driver's License (mDL) deployment across U
 
 | Source | What | How |
 |--------|------|-----|
-| **TSA** | Participating states | Scrape tsa.gov digital ID page |
+| **TSA** | Participating states | Scrape tsa.gov digital-ID and REAL ID waiver pages (full names only; no 2-letter abbr matching) |
 | **AAMVA VICAL** | Root certificates per state | Download COSE/CBOR VICAL, parse X.509 certs |
-| **Web Discovery** | State-published IACA roots | Fetch from CA, GA, HI, PR DMV/DOT sites |
+| **Web Discovery** | State-published IACA roots | Fetch from CA, GA, HI, NM, OH, OK, PR DMV/DOT sites |
+| **Google Wallet** | Production IACA table | Parse the supported-issuers table; ingest downloadable files; record VICAL redirects |
 
 ## Architecture
 

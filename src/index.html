@@ -278,6 +278,7 @@
         .badge-tsa { background: var(--teal); color: var(--navy); }
         .badge-aamva { background: var(--sky); color: #fff; }
         .badge-web { background: var(--violet); color: #fff; }
+        .badge-google { background: #4285f4; color: #fff; }
         .badge-wallet {
             background: var(--slate-100);
             color: var(--slate-700);
@@ -730,6 +731,7 @@ function renderStats(container) {
         { label: 'TSA Recognized', value: s.tsa_recognized, note: 'Participating states' },
         { label: 'VICAL Roots', value: s.vical_authorities, note: 'States in AAMVA VICAL' },
         { label: 'Web Discovered', value: s.web_discovered, note: 'Roots from state sites' },
+        { label: 'Google Wallet', value: s.google_listed ?? 0, note: 'US mDL rows in IACA table' },
         { label: 'Total Roots', value: s.total_roots, note: 'Across all sources' },
         { label: 'Root Coverage', value: s.root_coverage_pct + '%', note: 'mDL programs w/ root' },
         { label: 'Pop. Coverage', value: s.population_coverage_pct + '%', note: 'US population eligible' },
@@ -772,6 +774,15 @@ function renderSources(container) {
             <dl class="source-detail">
                 <dt>Source</dt><dd>State DMV / DOT sites</dd>
                 <dt>Roots Found</dt><dd>${DATA.stats.web_discovered} states</dd>
+            </dl>
+        </div>
+        <div class="source-card">
+            <h3>👛 Google Wallet IACA</h3>
+            <dl class="source-detail">
+                <dt>Source</dt><dd>developers.google.com</dd>
+                <dt>US mDL rows</dt><dd>${DATA.stats.google_listed ?? 0}</dd>
+                <dt>Direct files</dt><dd>${DATA.stats.google_files ?? 0}</dd>
+                <dt>VICAL redirects</dt><dd>${(DATA.google_meta && DATA.google_meta.vical_states ? DATA.google_meta.vical_states.length : 0)}</dd>
             </dl>
         </div>
     `;
@@ -1040,7 +1051,7 @@ function renderAuthorityCards() {
     grid.innerHTML = filtered.map(auth => {
         const hasRoots = auth.roots.length > 0;
         const sourceBadges = auth.sources.map(s => {
-            const cls = s === 'TSA' ? 'badge-tsa' : s === 'AAMVA' ? 'badge-aamva' : 'badge-web';
+            const cls = s === 'TSA' ? 'badge-tsa' : s === 'AAMVA' ? 'badge-aamva' : s === 'Google' ? 'badge-google' : 'badge-web';
             return `<span class="badge ${cls}">${s}</span>`;
         }).join('');
         const walletBadges = (auth.eligible_ids || []).map(id =>
@@ -1240,7 +1251,9 @@ function renderFooter(container) {
     f.className = 'footer';
     f.innerHTML = `
         <div>Data sourced from <a href="https://www.tsa.gov/digital-id/participating-states" target="_blank">TSA</a>,
-        <a href="https://vical.dts.aamva.org" target="_blank">AAMVA VICAL</a>, and state DMV/DOT sites.</div>
+        <a href="https://vical.dts.aamva.org" target="_blank">AAMVA VICAL</a>,
+        <a href="https://developers.google.com/wallet/identity/verify/supported-issuers-iaca-certs" target="_blank">Google Wallet IACA</a>,
+        and state DMV/DOT sites.</div>
         <div style="margin-top:0.5rem;">Learn about the WebPKI at the <a href="https://webpki.systematicreasoning.com" target="_blank">WebPKI Observatory</a>.</div>
     `;
     container.appendChild(f);

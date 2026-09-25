@@ -37,17 +37,31 @@ from cryptography.hazmat.primitives.asymmetric import ec, rsa
 # Configuration
 # ---------------------------------------------------------------------------
 
-PIPELINE_VERSION = "1.0.0"
+PIPELINE_VERSION = "1.1.0"
 TEMPLATE_PATH = Path("src/index.html")
 OUTPUT_PATH = Path("docs/index.html")
 
 TSA_URL = "https://www.tsa.gov/digital-id/participating-states"
+TSA_WAIVER_URL = "https://www.tsa.gov/realid/realid-mobile-drivers-license-mdls"
 VICAL_BASE_URL = "https://vical.dts.aamva.org/"
+GOOGLE_IACA_URL = (
+    "https://developers.google.com/wallet/identity/verify/supported-issuers-iaca-certs"
+)
+
+# Minimum known-good set used when TSA pages are blocked or only partially
+# rendered. Refresh when the live waiver list changes:
+# https://www.tsa.gov/realid/realid-mobile-drivers-license-mdls
+TSA_FALLBACK_STATES: set[str] = {
+    "AK", "AZ", "AR", "CA", "CO", "GA", "HI", "IL", "IA", "KY",
+    "LA", "MD", "MT", "NM", "NY", "ND", "OH", "OK", "PR", "UT",
+    "VA", "WV",
+}
+TSA_FALLBACK_AS_OF = "2026-09-25"
 
 REQUEST_TIMEOUT = 20
 USER_AGENT = (
-    "mDL-Dashboard-Pipeline/1.0 "
-    "(Peculiar Ventures; https://peculiarventures.com)"
+    "Mozilla/5.0 (compatible; mDL-Dashboard-Pipeline/1.1; "
+    "+https://mdl.peculiarventures.com)"
 )
 
 # 2020 US Census state populations
@@ -95,8 +109,14 @@ KNOWN_STATE_CERT_URLS: list[tuple[str, str, str, str]] = [
     ("CA", "https://trust.dmv.ca.gov/certificates/ca-dmv-iaca-root-ca-crt.cer", "CA DMV mDL Root", "cer"),
     ("GA", "https://dds.georgia.gov/document/document/ga-mdl-rootzip/download", "GA DDS mDL Root", "zip"),
     ("HI", "https://hidot.hawaii.gov/highways/files/2024/08/2024_HI_IACA_Root.zip", "HI DOT mDL Root", "zip"),
+    ("NM", "https://www.mvd.newmexico.gov/wp-content/uploads/2025/10/New-Mexico-IACA-Certificate.zip", "NM MVD IACA Root", "zip"),
+    ("OH", "https://bmvonline.dps.ohio.gov/bmvonline/home/Downloads/ohio_mdl_iaca_root_2024.zip", "OH BMV IACA Root", "zip"),
+    ("OK", "https://www.oklahoma.gov/content/dam/service-oklahoma/Documents/digital-id/SOK%20BOOST%20Mobile%20Credential%20Root%20IACA%207_1_26.zip", "OK Service Oklahoma IACA Root", "zip"),
     ("PR", "https://docs.pr.gov/files/ID_movil-mDL/Certificado_IACA/PRDTOPProdCA.pem", "PR DTOP mDL Root", "pem"),
 ]
+
+# Google Wallet rows that are not a downloadable IACA file.
+VICAL_HOSTS = ("vical.dts.aamva.org",)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -188,8 +208,12 @@ def _cert_to_record(cert: x509.Certificate, state: str) -> dict:
         "fingerprint_sha256": fingerprint,
         "subject_cn": cn,
         "subject_full": cert.subject.rfc4514_string(),
-        "not_before": cert.not_valid_before_utc.isoformat(),
-        "not_after": cert.not_valid_after_utc.isoformat(),
+        "not_before": (
+            getattr(cert, "not_valid_before_utc", None) or cert.not_valid_before
+        ).isoformat(),
+        "not_after": (
+            getattr(cert, "not_valid_after_utc", None) or cert.not_valid_after
+        ).isoformat(),
         "algorithm": algorithm,
         "key_detail": key_detail,
         "tags": ca_tags,
@@ -202,35 +226,46 @@ def _cert_to_record(cert: x509.Certificate, state: str) -> dict:
 # TSA scraper
 # ---------------------------------------------------------------------------
 
-def fetch_tsa_states(session: requests.Session) -> set[str]:
-    """
-    Scrape the TSA digital ID page and return a set of state abbreviations
-    that are listed as participating in mDL / digital ID.
-    """
-    log.info("Fetching TSA participating states …")
-    try:
-        resp = session.get(TSA_URL, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-    except Exception as exc:
-        log.warning("TSA fetch failed: %s", exc)
-        return set()
+def _states_from_html(html: str) -> set[str]:
+    """Extract state names from discrete listing elements.
 
-    soup = BeautifulSoup(resp.text, "html.parser")
+    Deliberately avoid scanning arbitrary page prose. Abbreviation matching
+    made "Digital ID" look like Idaho, while substring matching made an
+    address such as "Washington, DC" look like Washington state.
+    """
     found: set[str] = set()
+    soup = BeautifulSoup(html, "html.parser")
+    for item in soup.find_all(["li", "td", "th", "h2", "h3", "h4", "p", "a"]):
+        text = " ".join(item.get_text(" ", strip=True).split())
+        text = text.strip(" \t\r\n:;,.–—-")
+        if text in STATE_TO_ABBR:
+            found.add(STATE_TO_ABBR[text])
+    return found
 
-    # TSA lists states in various page structures — scan all text for known names/abbrs
-    full_text = soup.get_text(" ", strip=True)
-    for state_name, abbr in STATE_TO_ABBR.items():
-        if state_name in full_text or abbr in full_text.split():
-            found.add(abbr)
 
-    # Also look for structured lists / tables
-    for item in soup.find_all(["li", "td", "th", "h3", "h4", "p"]):
-        text = item.get_text(strip=True)
-        for state_name, abbr in STATE_TO_ABBR.items():
-            if state_name == text.strip() or abbr == text.strip():
-                found.add(abbr)
-
+def fetch_tsa_states(session: requests.Session) -> set[str]:
+    """Scrape TSA participating-states and REAL ID waiver pages."""
+    log.info("Fetching TSA participating states …")
+    found: set[str] = set()
+    for label, url in (("participating-states", TSA_URL), ("realid-waiver", TSA_WAIVER_URL)):
+        try:
+            resp = session.get(url, timeout=REQUEST_TIMEOUT)
+            resp.raise_for_status()
+        except Exception as exc:
+            log.warning("TSA %s fetch failed: %s", label, exc)
+            continue
+        page_states = _states_from_html(resp.text)
+        log.info("  TSA %s: %d jurisdictions", label, len(page_states))
+        found |= page_states
+    missing_fallback = TSA_FALLBACK_STATES - found
+    if missing_fallback:
+        log.warning(
+            "TSA scrape omitted %d known jurisdictions; supplementing from "
+            "fallback list as of %s",
+            len(missing_fallback),
+            TSA_FALLBACK_AS_OF,
+        )
+        found |= TSA_FALLBACK_STATES
     log.info("TSA: found %d participating states", len(found))
     return found
 
@@ -396,52 +431,162 @@ def _infer_state_from_cert(cert: x509.Certificate) -> str:
 # Web root discovery
 # ---------------------------------------------------------------------------
 
-def discover_web_roots(
+def _guess_cert_format(url: str) -> str | None:
+    path = url.split("?", 1)[0].lower()
+    if path.endswith(".zip"):
+        return "zip"
+    if path.endswith((".cer", ".crt", ".der", ".pem")):
+        return "cer"
+    return None
+
+
+def _is_vical_url(url: str) -> bool:
+    return any(host in url for host in VICAL_HOSTS)
+
+
+def _fetch_cert_url(
     session: requests.Session,
+    abbr: str,
+    url: str,
+    label: str,
+    fmt: str,
 ) -> list[tuple[str, x509.Certificate, str]]:
-    """
-    Attempt to fetch root certificates from known state DMV/DOT URLs.
-    Supports .cer/.pem (DER or PEM) and .zip archives containing certs.
-    Returns [(state_abbr, Certificate, source_label), ...].
-    """
     import io
     import zipfile
 
-    log.info("Discovering web roots from %d known URLs …", len(KNOWN_STATE_CERT_URLS))
     results: list[tuple[str, x509.Certificate, str]] = []
+    try:
+        resp = session.get(url, timeout=REQUEST_TIMEOUT)
+        if resp.status_code != 200:
+            log.debug("  %s: HTTP %s (%s)", abbr, resp.status_code, url)
+            return results
+        if fmt == "zip" or resp.content[:2] == b"PK":
+            try:
+                zf = zipfile.ZipFile(io.BytesIO(resp.content))
+                for name in zf.namelist():
+                    if re.search(r"\.(cer|der|crt|pem)$", name, re.IGNORECASE):
+                        cert = _parse_cert(zf.read(name))
+                        if cert:
+                            results.append((abbr, cert, label))
+                            log.info("  ✓  %s: root in zip (%s → %s)", abbr, label, name)
+            except zipfile.BadZipFile:
+                log.debug("  %s: not a valid zip (%s)", abbr, url)
+            return results
+        cert = _parse_cert(resp.content)
+        if cert:
+            results.append((abbr, cert, label))
+            log.info("  ✓  %s: root found (%s)", abbr, label)
+        else:
+            log.debug("  %s: not parseable as certificate", abbr)
+    except Exception as exc:
+        log.debug("  %s: fetch error — %s", abbr, exc)
+    return results
 
-    for abbr, url, label, fmt in KNOWN_STATE_CERT_URLS:
-        try:
-            resp = session.get(url, timeout=REQUEST_TIMEOUT)
-            if resp.status_code != 200:
-                log.debug("  %s: HTTP %s (%s)", abbr, resp.status_code, url)
-                continue
 
-            if fmt == "zip":
-                # Extract certs from zip archive
-                try:
-                    zf = zipfile.ZipFile(io.BytesIO(resp.content))
-                    for name in zf.namelist():
-                        if re.search(r'\.(cer|der|crt|pem)$', name, re.IGNORECASE):
-                            cert_data = zf.read(name)
-                            cert = _parse_cert(cert_data)
-                            if cert:
-                                results.append((abbr, cert, label))
-                                log.info("  ✓  %s: root found in zip (%s → %s)", abbr, label, name)
-                except zipfile.BadZipFile:
-                    log.debug("  %s: not a valid zip archive (%s)", abbr, url)
-            else:
-                # Direct cert file (DER or PEM)
-                cert = _parse_cert(resp.content)
-                if cert:
-                    results.append((abbr, cert, label))
-                    log.info("  ✓  %s: root found (%s)", abbr, label)
-                else:
-                    log.debug("  %s: content not parseable as certificate", abbr)
-        except Exception as exc:
-            log.debug("  %s: fetch error — %s", abbr, exc)
+def parse_google_iaca_table(session: requests.Session) -> dict[str, Any]:
+    """
+    Ingest Google Wallet's production IACA table.
 
-    log.info("Web discovery: found %d roots", len(results))
+    Returns metadata plus downloadable US-state file URLs. Rows that
+    redirect to AAMVA VICAL are recorded but not re-fetched.
+    Non-US issuers (ID Pass, Aadhaar, etc.) are listed separately and
+    are not treated as US mDL programs.
+    """
+    log.info("Ingesting Google Wallet IACA table …")
+    meta: dict[str, Any] = {
+        "source": GOOGLE_IACA_URL,
+        "listed_states": [],
+        "file_states": [],
+        "vical_states": [],
+        "page_states": [],
+        "non_us": [],
+        "file_urls": [],
+    }
+    try:
+        resp = session.get(GOOGLE_IACA_URL, timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+    except Exception as exc:
+        log.warning("Google IACA table fetch failed: %s", exc)
+        return meta
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    seen_states: set[str] = set()
+    for row in soup.find_all("tr"):
+        cells = row.find_all(["td", "th"])
+        if len(cells) < 3:
+            continue
+        jurisdiction = cells[0].get_text(" ", strip=True)
+        cred_type = cells[1].get_text(" ", strip=True)
+        if jurisdiction in {"Country / US State", "Country"}:
+            continue
+        link = cells[2].find("a")
+        href = (link.get("href") or "").strip() if link else ""
+        if href.startswith("/"):
+            href = "https://developers.google.com" + href
+
+        abbr = STATE_TO_ABBR.get(jurisdiction)
+        if not abbr:
+            if jurisdiction and jurisdiction not in {"Country / US State", "Country"}:
+                meta["non_us"].append({
+                    "name": jurisdiction,
+                    "credential_type": cred_type,
+                    "href": href,
+                })
+            continue
+        if cred_type and cred_type.lower() not in {"mdl", "credential type"}:
+            # e.g. Google's own "ID Pass" row under United States
+            meta["non_us"].append({
+                "name": jurisdiction,
+                "credential_type": cred_type,
+                "href": href,
+            })
+            continue
+
+        if abbr not in seen_states:
+            meta["listed_states"].append(abbr)
+            seen_states.add(abbr)
+
+        if not href:
+            continue
+        if _is_vical_url(href):
+            if abbr not in meta["vical_states"]:
+                meta["vical_states"].append(abbr)
+            continue
+        fmt = _guess_cert_format(href)
+        if fmt:
+            meta["file_urls"].append((abbr, href, f"Google Wallet IACA ({abbr})", fmt))
+            if abbr not in meta["file_states"]:
+                meta["file_states"].append(abbr)
+        else:
+            if abbr not in meta["page_states"]:
+                meta["page_states"].append(abbr)
+
+    log.info(
+        "Google IACA: %d US mDL rows (%d file, %d VICAL, %d page-only), %d non-US",
+        len(meta["listed_states"]),
+        len(meta["file_states"]),
+        len(meta["vical_states"]),
+        len(meta["page_states"]),
+        len(meta["non_us"]),
+    )
+    return meta
+
+
+def discover_web_roots(
+    session: requests.Session,
+    extra_urls: list[tuple[str, str, str, str]] | None = None,
+) -> list[tuple[str, x509.Certificate, str]]:
+    """Fetch IACA files from the hardcoded catalog plus Google-discovered URLs."""
+    log.info("Discovering web roots …")
+    results: list[tuple[str, x509.Certificate, str]] = []
+    seen: set[str] = set()
+    catalog = list(KNOWN_STATE_CERT_URLS) + list(extra_urls or [])
+    for abbr, url, label, fmt in catalog:
+        if url in seen:
+            continue
+        seen.add(url)
+        results.extend(_fetch_cert_url(session, abbr, url, label, fmt))
+    log.info("Web discovery: found %d roots from %d URLs", len(results), len(seen))
     return results
 
 
@@ -454,6 +599,8 @@ def build_dashboard_data(
     vical_meta: dict,
     vical_certs: list[tuple[str, x509.Certificate]],
     web_certs: list[tuple[str, x509.Certificate, str]],
+    google_meta: dict | None = None,
+    google_certs: list[tuple[str, x509.Certificate, str]] | None = None,
 ) -> dict:
     """
     Merge all sources into the DASHBOARD_DATA schema expected by index.html.
@@ -485,8 +632,14 @@ def build_dashboard_data(
     for abbr, cert, label in web_certs:
         _add_cert(abbr, cert, "Web")
 
-    # --- Determine all mDL states (TSA union VICAL union web) ---------------
-    mdl_states: set[str] = set(tsa_states)
+    for abbr, cert, label in (google_certs or []):
+        _add_cert(abbr, cert, "Google")
+
+    google_meta = google_meta or {}
+    google_listed = set(google_meta.get("listed_states") or [])
+
+    # --- Determine all mDL states (TSA union VICAL union web union Google) --
+    mdl_states: set[str] = set(tsa_states) | google_listed
     for abbr in state_certs:
         if abbr != "XX":
             mdl_states.add(abbr)
@@ -510,6 +663,10 @@ def build_dashboard_data(
             sources.append("AAMVA")
         if any("Web" in r.get("_sources", []) for r in roots_map.values()):
             sources.append("Web")
+        if abbr in google_listed or any(
+            "Google" in r.get("_sources", []) for r in roots_map.values()
+        ):
+            sources.append("Google")
 
         # Build clean root records (drop private fields)
         roots = []
@@ -566,11 +723,25 @@ def build_dashboard_data(
     # Count distinct states in VICAL
     vical_state_set = {abbr for abbr, _ in vical_certs if abbr != "XX"}
     web_state_set = {abbr for abbr, _, _ in web_certs}
+    google_file_states = set(google_meta.get("file_states") or [])
+    google_cert_states = {abbr for abbr, _, _ in (google_certs or [])}
+
+    # Serializable copy of Google metadata (drop the raw URL tuples).
+    google_public = {
+        "source": google_meta.get("source", GOOGLE_IACA_URL),
+        "listed_states": google_meta.get("listed_states") or [],
+        "file_states": google_meta.get("file_states") or [],
+        "vical_states": google_meta.get("vical_states") or [],
+        "page_states": google_meta.get("page_states") or [],
+        "non_us_count": len(google_meta.get("non_us") or []),
+    }
 
     stats = {
         "tsa_recognized": len(tsa_states),
         "vical_authorities": len(vical_state_set),
         "web_discovered": len(web_state_set),
+        "google_listed": len(google_listed),
+        "google_files": len(google_file_states | google_cert_states),
         "total_roots": total_roots,
         "root_coverage_pct": root_coverage_pct,
         "population_coverage_pct": pop_coverage_pct,
@@ -581,6 +752,7 @@ def build_dashboard_data(
         "_pipeline_version": PIPELINE_VERSION,
         "stats": stats,
         "vical_meta": vical_meta,
+        "google_meta": google_public,
         "map_states": map_states,
         "authorities": authorities,
         "_pem_bundle": pem_bundle,
@@ -638,12 +810,30 @@ def main() -> int:
     tsa_states = fetch_tsa_states(session)
     vical_meta, vical_certs = fetch_vical(session)
 
+    google_meta: dict[str, Any] = {}
+    google_certs: list[tuple[str, x509.Certificate, str]] = []
     web_certs: list[tuple[str, x509.Certificate, str]] = []
     if not args.no_web:
+        google_meta = parse_google_iaca_table(session)
         web_certs = discover_web_roots(session)
+        # Fetch Google-advertised files separately so they keep a Google source tag.
+        known_urls = {url for _, url, _, _ in KNOWN_STATE_CERT_URLS}
+        extra = [
+            row for row in google_meta.get("file_urls") or []
+            if row[1] not in known_urls
+        ]
+        for abbr, url, label, fmt in extra:
+            google_certs.extend(_fetch_cert_url(session, abbr, url, label, fmt))
 
     # --- Build data ---------------------------------------------------------
-    data = build_dashboard_data(tsa_states, vical_meta, vical_certs, web_certs)
+    data = build_dashboard_data(
+        tsa_states,
+        vical_meta,
+        vical_certs,
+        web_certs,
+        google_meta=google_meta,
+        google_certs=google_certs,
+    )
 
     log.info(
         "Built dashboard data: %d states, %d total roots",
